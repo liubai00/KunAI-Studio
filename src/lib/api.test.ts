@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
 import { DEFAULT_SETTINGS } from './apiProfiles'
 import { callImageApi } from './api'
+import { PLATFORM_IMAGE_PROFILE_ID } from './platformMode'
+import { clearActiveStorageUser, setActiveStorageUser } from './userStorage'
 
 describe('callImageApi', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllEnvs()
     vi.useRealTimers()
+    clearActiveStorageUser()
   })
 
   it.each([false, true])(
@@ -405,6 +408,120 @@ describe('callImageApi', () => {
       'data:image/png;base64,cGFydGlhbA==',
       'data:image/png;base64,cGFydGlhbA==',
     ])
+  })
+
+  it('splits managed platform batches into one billable request per image', async () => {
+    setActiveStorageUser('42')
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
+      data: [{ b64_json: 'aW1hZ2U=' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const profile = {
+      ...DEFAULT_SETTINGS.profiles[0],
+      id: PLATFORM_IMAGE_PROFILE_ID,
+      apiKey: 'managed-session',
+      streamImages: false,
+    }
+
+    const result = await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'managed-session',
+        profiles: [profile],
+        activeProfileId: profile.id,
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS, n: 3 },
+      inputImageDataUrls: [],
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    for (const [, init] of fetchMock.mock.calls) {
+      const body = JSON.parse(String((init as RequestInit).body))
+      expect(body.n).toBeUndefined()
+      expect(body.stream).toBeUndefined()
+      expect(new Headers((init as RequestInit).headers).get('X-Image-Studio-User')).toBe('42')
+    }
+    expect(result.images).toHaveLength(3)
+  })
+
+  it('persists the managed request id before sending the billable request', async () => {
+    setActiveStorageUser('42')
+    let finishPersistence = () => {}
+    const persistence = new Promise<void>((resolve) => {
+      finishPersistence = resolve
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'aW1hZ2U=' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const profile = {
+      ...DEFAULT_SETTINGS.profiles[0],
+      id: PLATFORM_IMAGE_PROFILE_ID,
+      apiKey: 'managed-session',
+      streamImages: false,
+    }
+
+    const result = callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'managed-session',
+        profiles: [profile],
+        activeProfileId: profile.id,
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+      onPlatformRequestStarted: async () => persistence,
+    })
+    await Promise.resolve()
+    expect(fetchMock).not.toHaveBeenCalled()
+    finishPersistence()
+    await result
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a managed batch recoverable while one billable request is uncertain', async () => {
+    setActiveStorageUser('42')
+    let postCalls = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (String(input).startsWith('/api/platform/generations/')) {
+        return new Response(JSON.stringify({ success: false, message: '任务尚未到达服务端' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      postCalls += 1
+      if (postCalls === 2) throw new TypeError('Failed to fetch')
+      return new Response(JSON.stringify({ data: [{ b64_json: 'aW1hZ2U=' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    const profile = {
+      ...DEFAULT_SETTINGS.profiles[0],
+      id: PLATFORM_IMAGE_PROFILE_ID,
+      apiKey: 'managed-session',
+      streamImages: false,
+    }
+
+    await expect(callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'managed-session',
+        profiles: [profile],
+        activeProfileId: profile.id,
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS, n: 2 },
+      inputImageDataUrls: [],
+      platformRequestIds: ['managed-request-0001', 'managed-request-0002'],
+    })).rejects.toThrow('Failed to fetch')
+    expect(postCalls).toBe(2)
   })
 
   it('keeps successful Images API concurrent results when one request fails', async () => {

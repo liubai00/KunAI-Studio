@@ -1,6 +1,9 @@
 import { DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type CustomProviderDefinition, type CustomProviderPollMapping, type CustomProviderResultMapping, type CustomProviderSubmitMapping, type ImageApiResponse, type ImageResponseItem, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
 import { dataUrlToBlob, imageDataUrlToPngBlob, maskDataUrlToPngBlob } from './canvasImage'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
+import { PLATFORM_IMAGE_PROFILE_ID } from './platformMode'
+import { createPlatformRequestId, getPlatformCsrfToken } from './platformSession'
+import { getActiveStorageUser } from './userStorage'
 import {
   assertImageInputPayloadSize,
   assertMaskEditFileSize,
@@ -82,9 +85,15 @@ function normalizeImageApiPayload(value: unknown): ImageApiResponse {
   return { data: [] }
 }
 
-function createRequestHeaders(profile: ApiProfile): Record<string, string> {
+function createRequestHeaders(profile: ApiProfile, requestId?: string): Record<string, string> {
+  const platformProfile = profile.id === PLATFORM_IMAGE_PROFILE_ID
   return {
     Authorization: `Bearer ${profile.apiKey}`,
+    ...(platformProfile ? {
+      'X-Image-Studio-User': getActiveStorageUser(),
+      'X-CSRF-Token': getPlatformCsrfToken(),
+      ...(requestId ? { 'X-Idempotency-Key': requestId } : {}),
+    } : {}),
   }
 }
 
@@ -489,11 +498,11 @@ export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile
 
 async function callImagesApi(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
   const n = opts.params.n > 0 ? opts.params.n : 1
-  if ((profile.codexCli || (profile.streamImages && n > 1)) && n > 1) {
+  if ((profile.id === PLATFORM_IMAGE_PROFILE_ID || profile.codexCli || (profile.streamImages && n > 1)) && n > 1) {
     return callImagesApiConcurrent(opts, profile, n)
   }
 
-  return callImagesApiSingle(opts, profile)
+  return callImagesApiSingle(opts, profile, 0)
 }
 
 async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile, n: number): Promise<CallApiResult> {
@@ -511,12 +520,16 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
       onPartialImage: opts.onPartialImage
         ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
         : undefined,
-    }, profile)),
+    }, profile, requestIndex)),
   )
 
   const successfulResults = results
     .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
     .map((r) => r.value)
+  const uncertainPlatformFailure = profile.id === PLATFORM_IMAGE_PROFILE_ID
+    ? results.find((r): r is PromiseRejectedResult => r.status === 'rejected' && isRecoverablePollingError(r.reason))
+    : undefined
+  if (uncertainPlatformFailure) throw uncertainPlatformFailure.reason
   const failedRequests = results.flatMap((r, requestIndex) =>
     r.status === 'rejected' ? [{ requestIndex, error: getErrorMessage(r.reason) }] : [],
   )
@@ -550,7 +563,29 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
   }
 }
 
-async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
+async function recoverPlatformImageRequest(requestId: string, mime: string): Promise<CallApiResult | null> {
+  for (let attempt = 0; attempt < 15; attempt++) {
+    let response: Response
+    try {
+      response = await fetch(`/api/platform/generations/${encodeURIComponent(requestId)}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      })
+    } catch {
+      return null
+    }
+    if (response.ok) return parseImagesApiResponse(await response.json() as ImageApiResponse, mime, new AbortController().signal)
+    if (response.status === 202) {
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      continue
+    }
+    if (response.status === 410) throw new Error(await getApiErrorMessage(response))
+    return null
+  }
+  return null
+}
+
+async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile, requestIndex: number): Promise<CallApiResult> {
   const { prompt: originalPrompt, params, inputImageDataUrls } = opts
   const prompt = profile.codexCli && !opts.settings.allowPromptRewrite
     ? `${PROMPT_REWRITE_GUARD_PREFIX}\n${originalPrompt}`
@@ -559,11 +594,16 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
-  const requestHeaders = createRequestHeaders(profile)
+  const platformRequestId = profile.id === PLATFORM_IMAGE_PROFILE_ID
+    ? opts.platformRequestIds?.[requestIndex] || createPlatformRequestId()
+    : undefined
+  if (platformRequestId) await opts.onPlatformRequestStarted?.({ requestId: platformRequestId, requestIndex })
+  const requestHeaders = createRequestHeaders(profile, platformRequestId)
   const paths = createOpenAICompatiblePaths()
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
+  let recoverable = Boolean(platformRequestId)
 
   try {
     let response: Response
@@ -668,7 +708,12 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
       })
     }
 
+    if (response.status === 202 && platformRequestId) {
+      throw new Error('生成任务仍在处理中')
+    }
+
     if (!response.ok) {
+      recoverable = false
       const errorMessage = await getApiErrorMessage(response)
       throw new Error(maybeAppendStreamingHint(errorMessage, response.status, profile.streamImages))
     }
@@ -678,6 +723,13 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
     }
 
     return parseImagesApiResponse(await response.json() as ImageApiResponse, mime, controller.signal)
+  } catch (err) {
+    if (recoverable && platformRequestId) {
+      const recovered = await recoverPlatformImageRequest(platformRequestId, mime)
+      if (recovered) return recovered
+      throw new Error(`与生成服务的连接状态不确定，可继续恢复：${getErrorMessage(err)}`)
+    }
+    throw err
   } finally {
     clearTimeout(timeoutId)
   }

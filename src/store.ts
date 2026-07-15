@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import type {
   AgentConversation,
   AgentMessage,
@@ -55,6 +55,8 @@ import { createTransparentOutputMeta, getTransparentRequestParams, removeKeyedBa
 import { blobToDataUrl, fileToDataUrl } from './lib/dataUrl'
 import { formatExportFileTime } from './lib/exportFileName'
 import { buildExportZip, readExportZip, readExportZipFileAsDataUrl } from './lib/exportZip'
+import { createUserScopedStorage } from './lib/userStorage'
+import { createPlatformSettings, isPlatformModeEnabled, PLATFORM_IMAGE_PROFILE_ID } from './lib/platformMode'
 
 export const ALL_FAVORITES_COLLECTION_ID = '__all_favorites__'
 export const DEFAULT_FAVORITE_COLLECTION_ID = '__default_favorites__'
@@ -1259,7 +1261,8 @@ export const useStore = create<AppState>()(
               : profile,
           )
         }
-        const settings = normalizeSettings(merged)
+        const normalizedSettings = normalizeSettings(merged)
+        const settings = isPlatformModeEnabled() ? createPlatformSettings(normalizedSettings) : normalizedSettings
         const shouldClearReusedProfile = st.reusedTaskApiProfileId && settings.activeProfileId === st.reusedTaskApiProfileId
         return {
           settings,
@@ -1622,6 +1625,7 @@ export const useStore = create<AppState>()(
     {
       name: 'gpt-image-playground',
       version: 2,
+      storage: createJSONStorage(() => createUserScopedStorage()),
       migrate: (persistedState) => migratePersistedState(persistedState),
       partialize: getPersistedState,
       merge: mergePersistedState,
@@ -1715,6 +1719,7 @@ export function markInterruptedOpenAIRunningTasks(tasks: TaskRecord[], now = Dat
   const interruptedTasks: TaskRecord[] = []
   const updatedTasks = tasks.map((task) => {
     if (!isRunningOpenAITask(task) || task.customTaskId) return task
+    if (task.platformRecoverable && task.platformRequestIds?.length) return task
 
     const updated: TaskRecord = {
       ...task,
@@ -2180,6 +2185,13 @@ export async function initStore() {
   useStore.getState().setTasks(tasks)
   showSupportPromptForExistingLocalData(tasks)
   for (const task of tasks) {
+    if (task.platformRecoverable && task.platformRequestIds?.length) {
+      if (task.status !== 'running') {
+        updateTaskInStore(task.id, { status: 'running', error: null, finishedAt: null, elapsed: null })
+      }
+      setTimeout(() => void executeTask(task.id), 0)
+      continue
+    }
     if (
       task.apiProvider === 'fal' &&
       task.falRequestId &&
@@ -2503,7 +2515,7 @@ function appendAgentStoppedMessage(content: string) {
 
 function markAgentRoundTasksStopped(conversationId: string, roundId: string, now = Date.now()) {
   const runningTasks = useStore.getState().tasks.filter((task) =>
-    (task.status === 'running' || task.falRecoverable || task.customRecoverable) &&
+    (task.status === 'running' || task.falRecoverable || task.customRecoverable || task.platformRecoverable) &&
     task.agentConversationId === conversationId &&
     task.agentRoundId === roundId,
   )
@@ -2516,6 +2528,7 @@ function markAgentRoundTasksStopped(conversationId: string, roundId: string, now
       error: AGENT_STOPPED_MESSAGE,
       falRecoverable: false,
       customRecoverable: false,
+      platformRecoverable: false,
       finishedAt: now,
       elapsed: Math.max(0, now - task.createdAt),
     })
@@ -3300,7 +3313,7 @@ function createAgentRecoveredToolOutputs(round: AgentRound, tasks: TaskRecord[])
         }
       })()
       const task = tasks.find((task) => task.agentRoundId === round.id && task.agentToolCallId === item.call_id)
-      if (!task || task.status === 'running' || task.falRecoverable || task.customRecoverable) {
+      if (!task || task.status === 'running' || task.falRecoverable || task.customRecoverable || task.platformRecoverable) {
         hasPendingRecoverableCall = true
         continue
       }
@@ -3327,7 +3340,7 @@ function createAgentRecoveredToolOutputs(round: AgentRound, tasks: TaskRecord[])
       const batchTasks = round.outputTaskIds
         .map((taskId) => tasks.find((task) => task.id === taskId))
         .filter((task): task is TaskRecord => Boolean(task && task.agentBatchCallId === item.call_id))
-      if (batchTasks.length < batchItems.length || batchTasks.some((task) => task.status === 'running' || task.falRecoverable || task.customRecoverable)) {
+      if (batchTasks.length < batchItems.length || batchTasks.some((task) => task.status === 'running' || task.falRecoverable || task.customRecoverable || task.platformRecoverable)) {
         hasPendingRecoverableCall = true
         continue
       }
@@ -3372,7 +3385,7 @@ function createReadyAgentRecoveredToolState(round: AgentRound, tasks: TaskRecord
   const roundTasks = round.outputTaskIds
     .map((taskId) => tasks.find((task) => task.id === taskId))
     .filter((task): task is TaskRecord => Boolean(task))
-  if (roundTasks.length === 0 || roundTasks.some((task) => task.status === 'running' || task.falRecoverable || task.customRecoverable)) return null
+  if (roundTasks.length === 0 || roundTasks.some((task) => task.status === 'running' || task.falRecoverable || task.customRecoverable || task.platformRecoverable)) return null
 
   return {
     additions: [] as ResponsesOutputItem[],
@@ -3417,7 +3430,7 @@ function getAgentRecoveredToolCallCount(output: ResponsesOutputItem[], tasks: Ta
 function getAgentRecoveredFailureError(round: AgentRound, tasks: TaskRecord[]) {
   const failedTasks = round.outputTaskIds
     .map((taskId) => tasks.find((item) => item.id === taskId))
-    .filter((task): task is TaskRecord => Boolean(task && task.status === 'error' && !task.falRecoverable && !task.customRecoverable))
+    .filter((task): task is TaskRecord => Boolean(task && task.status === 'error' && !task.falRecoverable && !task.customRecoverable && !task.platformRecoverable))
 
   if (failedTasks.length === 0) return '图像生成失败'
   if (failedTasks.length === 1) return failedTasks[0].error || '图像生成失败'
@@ -3898,6 +3911,7 @@ async function executeAgentRound(
         finishedAt: Date.now(),
         elapsed: Date.now() - (latestTask?.createdAt ?? startedAt),
         agentToolAction: image.action,
+        platformRecoverable: false,
       })
       useStore.getState().setTaskStreamPreview(taskId)
       return taskId
@@ -3916,6 +3930,7 @@ async function executeAgentRound(
         rawResponsePayload,
         falRecoverable: false,
         customRecoverable: false,
+        platformRecoverable: false,
         finishedAt: Date.now(),
         elapsed: Date.now() - latestTask.createdAt,
       })
@@ -3950,6 +3965,18 @@ async function executeAgentRound(
           elapsed: Date.now() - latestTask.createdAt,
         })
         scheduleCustomRecovery(taskId)
+        return true
+      }
+
+      if (latestTask.platformRequestIds?.length) {
+        useStore.getState().setTaskStreamPreview(taskId)
+        updateTaskInStore(taskId, {
+          status: 'error',
+          error: '与生成服务的连接已断开，可使用原任务继续恢复，不会重复扣费。',
+          platformRecoverable: true,
+          finishedAt: Date.now(),
+          elapsed: Date.now() - latestTask.createdAt,
+        })
         return true
       }
 
@@ -4057,6 +4084,13 @@ async function executeAgentRound(
         prompt: replaceImageMentionsForApi(opts.prompt, opts.referenceImageDataUrls.length),
         params: opts.taskParams,
         inputImageDataUrls: opts.referenceImageDataUrls,
+        platformRequestIds: useStore.getState().tasks.find((task) => task.id === opts.taskId)?.platformRequestIds,
+        onPlatformRequestStarted: async (request) => {
+          const latest = useStore.getState().tasks.find((task) => task.id === opts.taskId)
+          const requestIds = [...(latest?.platformRequestIds || [])]
+          requestIds[request.requestIndex] = request.requestId
+          await updateTaskInStore(opts.taskId, { platformRequestIds: requestIds, platformRecoverable: true })
+        },
         onPartialImage: opts.onPartialImage
           ? (partial) => {
               void opts.onPartialImage?.({ image: partial.image, partialImageIndex: partial.partialImageIndex ?? partial.requestIndex })
@@ -4712,6 +4746,13 @@ async function executeTask(taskId: string) {
       params: task.params,
       inputImageDataUrls: inputDataUrls,
       maskDataUrl,
+      platformRequestIds: task.platformRecoverable ? task.platformRequestIds : undefined,
+      onPlatformRequestStarted: async (request) => {
+        const latest = useStore.getState().tasks.find((item) => item.id === taskId)
+        const requestIds = [...(latest?.platformRequestIds || [])]
+        requestIds[request.requestIndex] = request.requestId
+        await updateTaskInStore(taskId, { platformRequestIds: requestIds, platformRecoverable: true })
+      },
       onFalRequestEnqueued: (request) => {
         falRequestInfo = request
         updateTaskInStore(taskId, {
@@ -4799,6 +4840,7 @@ async function executeTask(taskId: string) {
       elapsed: Date.now() - task.createdAt,
       falRecoverable: false,
       customRecoverable: false,
+      platformRecoverable: false,
     })
     void deleteUnreferencedImageIds(partialImageIdsToClean)
 
@@ -4847,6 +4889,15 @@ async function executeTask(taskId: string) {
         elapsed: Date.now() - task.createdAt,
       })
       scheduleCustomRecovery(taskId)
+    } else if (latestTask.platformRecoverable && latestTask.platformRequestIds?.length && isNetworkRecoverableError(err)) {
+      updateTaskInStore(taskId, {
+        status: 'error',
+        error: '与生成服务的连接已断开，可使用原任务继续恢复，不会重复扣费。',
+        platformRecoverable: true,
+        finishedAt: Date.now(),
+        elapsed: Date.now() - task.createdAt,
+      })
+      useStore.getState().setDetailTaskId(taskId)
     } else {
       let errorMessage = err instanceof Error ? err.message : String(err)
       const settings = useStore.getState().settings
@@ -4869,6 +4920,7 @@ async function executeTask(taskId: string) {
         ...getRawErrorPayload(err),
         falRecoverable: false,
         customRecoverable: false,
+        platformRecoverable: false,
         finishedAt: Date.now(),
         elapsed: Date.now() - task.createdAt,
       })
@@ -4905,7 +4957,7 @@ export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
   const task = updated.find((t) => t.id === taskId)
   setTasks(updated)
   maybeOpenSupportPrompt(tasks, updated, taskId)
-  if (task) putTask(task)
+  if (task) return putTask(task)
 }
 
 function normalizeFavoriteCollectionIds(ids: unknown) {
@@ -5099,6 +5151,9 @@ export async function retryTask(task: TaskRecord) {
     createdAt: Date.now(),
     finishedAt: null,
     elapsed: null,
+    ...(task.platformRecoverable && task.platformRequestIds?.length
+      ? { platformRequestIds: [...task.platformRequestIds], platformRecoverable: true }
+      : {}),
   }
 
   const latestTasks = useStore.getState().tasks

@@ -8,6 +8,9 @@ import HelpModal from './HelpModal'
 import HistoryModal from './HistoryModal'
 import { useFavoriteCollectionTitle } from './FavoriteCollections'
 import { EditIcon, HelpCircleIcon, HistoryIcon, InstallIcon, SettingsIcon } from './icons'
+import PlatformAccount from './platform/PlatformAccount'
+import { hasPlatformCapability, usePlatformStore } from '../platformStore'
+import { isPlatformModeEnabled } from '../lib/platformMode'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -41,6 +44,9 @@ export default function Header() {
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const historyButtonRef = useRef<HTMLButtonElement>(null)
   const createConversation = useStore((s) => s.createAgentConversation)
+  const platformUser = usePlatformStore((s) => s.user)
+  const platformStatus = usePlatformStore((s) => s.status)
+  const agentAllowed = !isPlatformModeEnabled() || hasPlatformCapability(platformUser, platformStatus, 'agent')
 
   useEffect(() => {
     if (appMode === 'agent') {
@@ -146,31 +152,17 @@ export default function Header() {
 
   return (
     <>
-      <header data-no-drag-select className={`safe-area-top fixed top-0 left-0 right-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-white/[0.08] transition-transform duration-300 ease-in-out ${appMode === 'agent' && !agentMobileHeaderVisible ? '-translate-y-full sm:translate-y-0' : 'translate-y-0'}`}>
+      <header data-no-drag-select className={`safe-area-top fixed top-0 left-0 right-0 z-40 bg-white/88 dark:bg-[#151513]/90 backdrop-blur-xl border-b border-black/[0.06] dark:border-white/[0.08] transition-transform duration-300 ease-in-out ${appMode === 'agent' && !agentMobileHeaderVisible ? '-translate-y-full sm:translate-y-0' : 'translate-y-0'}`}>
         <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between relative">
           <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
-            <h1 className="inline-flex min-w-0 items-start relative mr-2">
+            <h1 className="inline-flex min-w-0 items-center relative mr-2">
               {showFavoriteCollectionTitle ? (
                 <>
                   <span className="min-w-0 truncate text-[17px] font-bold tracking-tight text-gray-800 dark:text-gray-100 sm:hidden" title={favoriteCollectionTitle}>{favoriteCollectionTitle}</span>
-                  <a
-                    href="https://github.com/CookSleep/gpt_image_playground"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hidden text-lg font-bold tracking-tight text-gray-800 transition-colors hover:text-gray-600 dark:text-gray-100 dark:hover:text-gray-300 sm:inline"
-                  >
-                    GPT Image Playground
-                  </a>
+                  <span className="hidden items-center gap-2.5 text-base font-semibold text-[#302d29] dark:text-gray-100 sm:inline-flex"><span className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-amber-500 text-xs font-bold text-white shadow-sm">I</span>Image Studio</span>
                 </>
               ) : (
-                <a
-                  href="https://github.com/CookSleep/gpt_image_playground"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[17px] sm:text-lg font-bold tracking-tight text-gray-800 dark:text-gray-100 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                >
-                  GPT Image Playground
-                </a>
+                <span className="inline-flex items-center gap-2.5 text-[16px] font-semibold text-[#302d29] dark:text-gray-100"><span className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-amber-500 text-xs font-bold text-white shadow-sm">I</span><span className="hidden xs:inline sm:inline">Image Studio</span></span>
               )}
               {hasUpdate && latestRelease && (
                 <a
@@ -235,18 +227,19 @@ export default function Header() {
               </div>
             </div>
           )}
-          <div className="hidden sm:flex items-center gap-1 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-gray-100/70 dark:bg-white/[0.04] p-1 mr-4">
+          <div className="hidden sm:flex items-center gap-1 rounded-lg border border-black/[0.06] dark:border-white/[0.08] bg-[#f4f3f1] dark:bg-white/[0.04] p-1 mr-3">
             <button
               type="button"
               onClick={() => setAppMode('gallery')}
-              className={`px-4 py-1.5 rounded-lg text-sm transition-colors ${appMode === 'gallery' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              className={`px-4 py-1.5 rounded-md text-sm transition-colors ${appMode === 'gallery' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
             >
               画廊
             </button>
             <button
               type="button"
               onClick={() => setAppMode('agent')}
-              className={`px-4 py-1.5 rounded-lg text-sm transition-colors ${appMode === 'agent' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              disabled={!agentAllowed}
+              className={`px-4 py-1.5 rounded-md text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${appMode === 'agent' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
             >
               Agent
             </button>
@@ -305,6 +298,7 @@ export default function Header() {
                 设置
               </ViewportTooltip>
             </div>
+            <PlatformAccount />
           </div>
         </div>
         <div className={`safe-area-x sm:hidden overflow-hidden transition-all duration-300 ease-in-out ${appMode === 'gallery' && scrollDirection === 'down' ? 'max-h-0 opacity-0 pb-0' : 'max-h-20 opacity-100 pb-2'}`}>
@@ -319,7 +313,8 @@ export default function Header() {
             <button
               type="button"
               onClick={() => setAppMode('agent')}
-              className={`px-4 py-1.5 rounded-lg text-sm transition-colors ${appMode === 'agent' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              disabled={!agentAllowed}
+              className={`px-4 py-1.5 rounded-lg text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${appMode === 'agent' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
             >
               Agent
             </button>

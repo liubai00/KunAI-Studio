@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { readFileSync } from 'fs'
 import { normalizeDevProxyConfig } from './src/lib/devProxy'
@@ -17,8 +17,11 @@ function loadDevProxyConfig() {
   }
 }
 
-export default defineConfig(({ command }) => {
+export default defineConfig(({ command, mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
   const devProxyConfig = command === 'serve' ? loadDevProxyConfig() : null
+  const platformMode = env.VITE_PLATFORM_MODE !== 'false'
+  const platformServer = env.PLATFORM_DEV_SERVER_URL || 'http://localhost:3001'
 
   return {
     plugins: [react()],
@@ -29,8 +32,20 @@ export default defineConfig(({ command }) => {
     },
     server: {
       host: true,
-      proxy:
-        devProxyConfig?.enabled
+      proxy: platformMode
+        ? {
+            '/api/platform': {
+              target: platformServer,
+              changeOrigin: true,
+              xfwd: true,
+            },
+            '/api-proxy': {
+              target: platformServer,
+              changeOrigin: true,
+              xfwd: true,
+            },
+          }
+        : devProxyConfig?.enabled
           ? {
               [devProxyConfig.prefix]: {
                 target: devProxyConfig.target,

@@ -1,14 +1,19 @@
+ARG IMAGE_MODEL=gpt-image-2
+ARG AGENT_MODEL=gpt-5.5
+
 # ---- Build stage ----
-FROM --platform=$BUILDPLATFORM node:20-alpine AS build
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS build
+
+ARG IMAGE_MODEL
+ARG AGENT_MODEL
 
 WORKDIR /app
 
-ENV VITE_DEFAULT_API_URL=__VITE_DEFAULT_API_URL_PLACEHOLDER__
-ENV VITE_API_PROXY_AVAILABLE=__VITE_API_PROXY_AVAILABLE_PLACEHOLDER__
-ENV VITE_API_PROXY_LOCKED=__VITE_API_PROXY_LOCKED_PLACEHOLDER__
-ENV VITE_DOCKER_DEPLOYMENT=__VITE_DOCKER_DEPLOYMENT_PLACEHOLDER__
-ENV VITE_DOCKER_LEGACY_API_URL_USED=__VITE_DOCKER_LEGACY_API_URL_USED_PLACEHOLDER__
-ENV VITE_SHOW_DEFAULT_CONFIG_ONLY=__VITE_SHOW_DEFAULT_CONFIG_ONLY_PLACEHOLDER__
+ENV VITE_PLATFORM_MODE=true
+ENV VITE_PLATFORM_IMAGE_MODEL=$IMAGE_MODEL
+ENV VITE_PLATFORM_AGENT_MODEL=$AGENT_MODEL
+ENV VITE_API_PROXY_AVAILABLE=true
+ENV VITE_API_PROXY_LOCKED=true
 
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -17,21 +22,29 @@ COPY . .
 RUN npm run build
 
 # ---- Production stage ----
-FROM nginx:alpine
+FROM node:22-bookworm-slim
 
+ARG IMAGE_MODEL
+ARG AGENT_MODEL
+
+WORKDIR /app
+ENV NODE_ENV=production
 ENV HOST=0.0.0.0
-ENV PORT=80
-ENV DEFAULT_API_URL=
-ENV API_PROXY_URL=
-ENV ENABLE_API_PROXY=false
-ENV LOCK_API_PROXY=false
-ENV SHOW_DEFAULT_CONFIG_ONLY=false
+ENV PORT=8080
+ENV PLATFORM_DB_PATH=/app/data/image-studio.sqlite
+ENV PLATFORM_RESULT_DIR=/app/data/results
+ENV PLATFORM_IMAGE_MODEL=$IMAGE_MODEL
+ENV PLATFORM_AGENT_MODEL=$AGENT_MODEL
 
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY deploy/nginx.conf /etc/nginx/templates/default.conf.template
-COPY --chmod=755 deploy/migrate-api-env.envsh /docker-entrypoint.d/05-migrate-api-env.envsh
-COPY --chmod=755 deploy/inject-api-url.sh /docker-entrypoint.d/40-inject-api-url.sh
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
-EXPOSE 80
+COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/server ./server
+RUN mkdir -p /app/data && chown -R node:node /app/data
 
-CMD ["nginx", "-g", "daemon off;"]
+USER node
+EXPOSE 8080
+VOLUME ["/app/data"]
+
+CMD ["node", "server/index.mjs"]

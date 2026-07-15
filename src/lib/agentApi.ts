@@ -1,6 +1,9 @@
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
 import { appendStreamingFormatHint, maybeAppendStreamingHint, getApiErrorMessage, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
+import { PLATFORM_AGENT_PROFILE_ID } from './platformMode'
+import { getPlatformCsrfToken } from './platformSession'
+import { getActiveStorageUser } from './userStorage'
 
 export interface AgentApiResultImage {
   toolCallId?: string
@@ -94,9 +97,14 @@ const AGENT_TITLE_INSTRUCTIONS = [
 const AGENT_TITLE_MAX_LENGTH = 28
 
 function createHeaders(profile: ApiProfile): Record<string, string> {
+  const platformProfile = profile.id === PLATFORM_AGENT_PROFILE_ID
   return {
     Authorization: `Bearer ${profile.apiKey}`,
     'Content-Type': 'application/json',
+    ...(platformProfile ? {
+      'X-Image-Studio-User': getActiveStorageUser(),
+      'X-CSRF-Token': getPlatformCsrfToken(),
+    } : {}),
   }
 }
 

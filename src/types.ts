@@ -182,6 +182,10 @@ export interface TaskRecord {
   customTaskId?: string
   /** 自定义异步任务是否等待自动恢复 */
   customRecoverable?: boolean
+  /** 平台图片请求幂等 ID，用于响应中断后的结果恢复 */
+  platformRequestIds?: string[]
+  /** 平台请求结果尚未确认，可使用原幂等 ID 恢复 */
+  platformRecoverable?: boolean
   /** API 返回的实际生效参数，用于标记与请求值不一致的情况 */
   actualParams?: Partial<TaskParams>
   /** 输出图片对应的实际生效参数，key 为 outputImages 中的图片 id */

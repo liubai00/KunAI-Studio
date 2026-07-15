@@ -19,6 +19,8 @@ export interface CallApiOptions {
   maskDataUrl?: string
   onFalRequestEnqueued?: (request: { requestId: string; endpoint: string }) => void
   onCustomTaskEnqueued?: (task: { taskId: string }) => void
+  platformRequestIds?: string[]
+  onPlatformRequestStarted?: (request: { requestId: string; requestIndex: number }) => void | Promise<void>
   onPartialImage?: (partial: { image: string; partialImageIndex?: number; requestIndex?: number }) => void
 }
 

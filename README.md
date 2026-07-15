@@ -23,6 +23,8 @@
 
 <br>
 
+> **平台版本说明**：当前仓库已支持独立的 Image Studio 平台模式，包括邮箱验证码注册、服务端 Session、角色与用户状态校验、余额账本、支付回调预留、同源安全中转以及按成功单图独立结算。账户、SMTP 和中转均由本服务直接管理，不需要安装、启动或连接 KunAI-NewAPI。单图请求标识会持久化，断线或刷新后可恢复已保存结果且不会重复扣费；生产环境必须同时持久化 SQLite 与结果目录。部署步骤见 [平台模式部署文档](docs/platform-deployment.md)。设置 `VITE_PLATFORM_MODE=false` 可继续使用原有 BYOK 纯前端模式。
+
 > 💡 **提示**：若需调用非 HTTPS 的内网或本地 HTTP API，请使用 GitHub Pages 版本或自行部署，Vercel 部署的体验版绑定的 `.dev` 域名因安全策略通常要求接口必须为 HTTPS。
 
 ---
@@ -170,6 +172,8 @@
 
 支持多种部署与开发方式。无论使用哪种方式，你都可以预设默认的 API 节点。
 
+> Image Studio 平台模式需要同源 Node BFF，推荐使用 `deploy/Dockerfile` 或 `npm start`。Vercel、Cloudflare 静态资源和 GitHub Pages 仅适用于设置 `VITE_PLATFORM_MODE=false` 的 BYOK 模式。
+
 <details>
 <summary><strong>▲ 方式一：Vercel 一键部署 (推荐)</strong></summary>
 
@@ -239,6 +243,8 @@ $env:VITE_DEFAULT_API_URL="https://api.openai.com/v1"; npm run deploy:cf
 
 <details>
 <summary><strong>🐳 方式三：Docker 部署</strong></summary>
+
+> 平台模式使用 `deploy/Dockerfile`，完整命令见 [平台部署文档](docs/platform-deployment.md)。下面的 Nginx 代理环境变量属于旧 BYOK 部署，需要使用 `deploy/Dockerfile.byok` 自行构建。
 
 官方镜像已发布至 GitHub Container Registry。Docker 部署支持在运行时注入默认配置。
 
@@ -326,6 +332,8 @@ services:
 
 <details>
 <summary><strong>💻 方式四：本地开发与静态构建</strong></summary>
+
+平台模式下，先按 [平台部署文档](docs/platform-deployment.md) 配置 `.env.local`；`npm run dev` 会同时启动 Vite 与同源 BFF。下面的默认 API URL 配置仅用于 BYOK 模式。
 
 **1. 环境准备与启动**
 

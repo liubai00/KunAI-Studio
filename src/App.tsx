@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
 import { activateFirstImportedProfile, buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from './lib/urlSettings'
@@ -21,14 +21,22 @@ import ImageContextMenu from './components/ImageContextMenu'
 import SupportPromptModal from './components/SupportPromptModal'
 import { FavoriteCollectionPickerModal, FavoriteCollectionsView, ManageCollectionsModal } from './components/FavoriteCollections'
 import { useGlobalClickSuppression } from './lib/clickSuppression'
+import { createPlatformSettings, isPlatformModeEnabled } from './lib/platformMode'
+import { hasPlatformCapability, usePlatformStore } from './platformStore'
 
 let customProviderConfigUrlImportStarted = false
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
   const appMode = useStore((s) => s.appMode)
+  const setAppMode = useStore((s) => s.setAppMode)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
+  const runningTaskCount = useStore((s) => s.tasks.filter((task) => task.status === 'running').length)
+  const refreshPlatformSession = usePlatformStore((s) => s.refreshSession)
+  const platformUser = usePlatformStore((s) => s.user)
+  const platformStatus = usePlatformStore((s) => s.status)
+  const previousRunningTaskCount = useRef(runningTaskCount)
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
 
@@ -50,6 +58,13 @@ export default function App() {
       const nextSearch = searchParams.toString()
       const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`
       window.history.replaceState(null, '', nextUrl)
+    }
+
+    if (isPlatformModeEnabled()) {
+      setSettings(createPlatformSettings(useStore.getState().settings))
+      clearAppliedUrlSettings()
+      initStore()
+      return
     }
 
     if (customProviderConfigUrl && defaultConfigOnly && !customProviderConfigUrlImportStarted) {
@@ -97,6 +112,19 @@ export default function App() {
   }, [setSettings])
 
   useEffect(() => {
+    if (isPlatformModeEnabled() && runningTaskCount < previousRunningTaskCount.current) {
+      void refreshPlatformSession().catch(() => undefined)
+    }
+    previousRunningTaskCount.current = runningTaskCount
+  }, [refreshPlatformSession, runningTaskCount])
+
+  useEffect(() => {
+    if (isPlatformModeEnabled() && appMode === 'agent' && !hasPlatformCapability(platformUser, platformStatus, 'agent')) {
+      setAppMode('gallery')
+    }
+  }, [appMode, platformStatus, platformUser, setAppMode])
+
+  useEffect(() => {
     const preventPageImageDrag = (e: DragEvent) => {
       if ((e.target as HTMLElement | null)?.closest('img')) {
         e.preventDefault()
@@ -108,7 +136,7 @@ export default function App() {
   }, [])
 
   return (
-    <>
+    <div data-platform-shell>
       <Header />
       {appMode === 'agent' ? (
         <AgentWorkspace />
@@ -131,6 +159,6 @@ export default function App() {
       <Toast />
       <MaskEditorModal />
       <ImageContextMenu />
-    </>
+    </div>
   )
 }

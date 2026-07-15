@@ -3,25 +3,36 @@
   "private": true,
   "version": "0.6.12",
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite",
+    "dev:server": "node --env-file-if-exists=.env.local --watch server/index.mjs",
     "mock:api": "node scripts/mock-image-api.mjs",
     "build": "tsc -b && vite build",
+    "start": "node scripts/start.mjs",
     "deploy:cf": "npm run build && wrangler deploy",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run && npm run test:server",
+    "test:server": "node --test server/*.node-test.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {
     "@fal-ai/client": "^1.10.0",
     "@streamdown/math": "^1.0.2",
+    "better-sqlite3": "^12.11.1",
     "core-js": "^3.49.0",
     "fflate": "^0.8.2",
     "katex": "^0.16.47",
+    "lucide-react": "^0.544.0",
+    "nodemailer": "^9.0.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "sharp": "^0.35.3",
     "streamdown": "^2.5.0",
     "zustand": "^5.0.5"
   },

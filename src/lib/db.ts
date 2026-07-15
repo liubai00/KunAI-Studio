@@ -1,4 +1,5 @@
 import type { AgentConversation, TaskRecord, StoredImage, StoredImageThumbnail } from '../types'
+import { getScopedDatabaseName } from './userStorage'
 
 const DB_NAME = 'gpt-image-playground'
 const DB_VERSION = 3
@@ -14,7 +15,7 @@ export const CURRENT_THUMBNAIL_VERSION = THUMBNAIL_VERSION
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION)
+    const req = indexedDB.open(getScopedDatabaseName(DB_NAME), DB_VERSION)
     req.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result
       if (!db.objectStoreNames.contains(STORE_TASKS)) {
