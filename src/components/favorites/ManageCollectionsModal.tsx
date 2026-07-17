@@ -296,23 +296,23 @@ export function ManageCollectionsModal() {
 
   return createPortal(
     <div data-no-drag-select className="fixed inset-0 z-[105] flex items-center justify-center p-4 sm:p-0" onClick={closeManage}>
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-overlay-in" />
-      <div ref={modalRef} className="relative z-10 flex max-h-[85vh] w-full max-w-[400px] flex-col overflow-hidden rounded-3xl bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] ring-1 ring-black/5 dark:ring-white/10 animate-modal-in" onClick={(e) => e.stopPropagation()}>
-        <div className="px-6 pt-6 pb-4 shrink-0 relative border-b border-gray-100 dark:border-[#333]">
-          <FavoriteActionButton tooltip="关闭" onClick={closeManage} wrapperClassName="absolute right-5 top-5 inline-flex" className="shrink-0 rounded-full p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200">
+      <div className="absolute inset-0 bg-[rgba(12,11,9,0.55)] backdrop-blur-sm animate-overlay-in" />
+      <div ref={modalRef} className="relative z-10 flex max-h-[85vh] w-full max-w-[400px] flex-col overflow-hidden rounded-[22px] bg-surface border border-line2 shadow-lift animate-modal-in" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 pt-6 pb-4 shrink-0 relative border-b border-line">
+          <FavoriteActionButton tooltip="关闭" onClick={closeManage} wrapperClassName="absolute right-5 top-5 inline-flex" className="shrink-0 rounded-[10px] p-1.5 text-ink-3 transition hover:bg-surface2 hover:text-ink">
             <CloseIcon className="h-5 w-5" />
           </FavoriteActionButton>
-          <h2 className="mb-2 pr-8 flex items-center gap-2.5 text-lg font-semibold text-gray-800 dark:text-gray-100 leading-snug">
+          <h2 className="mb-2 pr-8 flex items-center gap-2.5 text-lg font-semibold font-display text-ink leading-snug">
             管理收藏夹
           </h2>
-          <p className="text-[13px] text-gray-500 dark:text-gray-400 leading-relaxed">
+          <p className="text-[13px] text-ink-3 leading-relaxed">
             在这里管理你的收藏夹列表及排序。
           </p>
         </div>
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden pt-3 pb-1">
           <div className="flex-1 overflow-y-auto custom-scrollbar relative">
             {selectableCollections.length === 0 ? (
-              <div className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">暂无收藏夹</div>
+              <div className="py-8 text-center text-sm text-ink-3">暂无收藏夹</div>
             ) : selectableCollections.map((collection) => {
               const isDefault = collection.id === defaultFavoriteCollectionId
               const canDelete = collections.length > 1
@@ -327,22 +327,22 @@ export function ManageCollectionsModal() {
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
                 onTouchCancel={handleDragEnd}
-                className={`group relative flex items-center justify-between transition-colors ${
-                  draggedId === collection.id ? 'opacity-40 bg-gray-100 dark:bg-white/[0.04]' : 'hover:bg-gray-50 dark:hover:bg-white/[0.04]'
+                className={`group relative flex items-center justify-between border-b border-line last:border-b-0 transition-colors ${
+                  draggedId === collection.id ? 'opacity-40 bg-surface2' : 'hover:bg-surface2'
                 }`}
                 onDragOver={(e) => handleDragOver(e, collection.id)}
                 onDrop={(e) => handleDrop(e, collection.id)}
               >
                 {dragOverId === collection.id && dragDropPosition === 'before' && draggedId !== collection.id && (
-                  <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 z-40 pointer-events-none" />
+                  <div className="absolute top-0 left-0 right-0 h-[2px] bg-accent z-40 pointer-events-none" />
                 )}
                 {dragOverId === collection.id && dragDropPosition === 'after' && draggedId !== collection.id && (
-                  <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 z-40 pointer-events-none" />
+                  <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent z-40 pointer-events-none" />
                 )}
                 <div className="flex h-12 items-center flex-1 min-w-0 gap-3 pl-4 pr-3">
-                  <div 
+                  <div
                     data-drag-handle
-                    className="flex cursor-grab active:cursor-grabbing items-center justify-center text-gray-400 opacity-60 transition-opacity hover:opacity-100 dark:text-gray-500 shrink-0"
+                    className="flex cursor-grab active:cursor-grabbing items-center justify-center text-ink-3 opacity-60 transition-opacity hover:opacity-100 shrink-0"
                     style={{ touchAction: 'none' }}
                   >
                     <DragHandleIcon className="h-3.5 w-3.5" />
@@ -350,7 +350,7 @@ export function ManageCollectionsModal() {
                   {editingId === collection.id ? (
                     <input
                       type="text"
-                      className="h-6 min-w-0 flex-1 rounded border border-blue-400/50 bg-white px-1.5 py-0 text-[15px] leading-6 text-gray-900 shadow-sm outline-none focus:border-blue-500 dark:border-white/20 dark:bg-black/20 dark:text-white dark:focus:border-white/40"
+                      className="h-8 min-w-0 flex-1 rounded-[11px] border border-line bg-surface2 px-2.5 text-[14px] text-ink outline-none transition focus:border-accent focus:ring-[3px] focus:ring-accent-soft"
                       value={editingName}
                       onChange={(e) => setEditingName(e.target.value)}
                       onKeyDown={handleRenameKeyDown}
@@ -359,7 +359,7 @@ export function ManageCollectionsModal() {
                       onBlur={confirmRename}
                     />
                   ) : (
-                    <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-gray-700 dark:text-gray-200" title={collection.name}>{collection.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-ink" title={collection.name}>{collection.name}</span>
                   )}
                 </div>
                 <div className={`flex shrink-0 items-center justify-end gap-2 overflow-hidden pr-4 transition-all duration-150 ${editingId === collection.id ? 'w-12' : 'w-28'}`}>
@@ -371,7 +371,7 @@ export function ManageCollectionsModal() {
                           e.stopPropagation()
                           confirmRename()
                         }}
-                        className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-md text-green-500 dark:text-green-400 hover:text-green-600 dark:hover:text-green-300 transition-colors"
+                        className="p-1.5 hover:bg-surface2 rounded-[10px] text-emerald-500 hover:text-emerald-600 transition-colors"
                       >
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -379,9 +379,9 @@ export function ManageCollectionsModal() {
                       </FavoriteActionButton>
                     ) : (
                       <>
-                        <FavoriteActionButton tooltip={isDefault ? '取消默认收藏夹' : '设为默认收藏夹'} onClick={(e) => handleSetDefault(e, collection)} className={`p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-md transition-colors ${isDefault ? 'text-yellow-500 dark:text-yellow-400' : 'text-gray-400 hover:text-yellow-500 dark:hover:text-yellow-400'}`}><FavoriteIcon filled={isDefault} className="w-3.5 h-3.5" /></FavoriteActionButton>
-                        <FavoriteActionButton tooltip="重命名" onClick={(e) => startRename(e, collection)} className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors"><EditIcon className="w-3.5 h-3.5" /></FavoriteActionButton>
-                        <FavoriteActionButton tooltip={canDelete ? '删除' : '至少保留一个收藏夹'} disabled={!canDelete} onClick={(e) => handleDelete(e, collection)} className={`p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-md transition-colors ${canDelete ? 'text-gray-400 hover:text-red-500 dark:hover:text-red-400' : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'}`}><TrashIcon className="w-3.5 h-3.5" /></FavoriteActionButton>
+                        <FavoriteActionButton tooltip={isDefault ? '取消默认收藏夹' : '设为默认收藏夹'} onClick={(e) => handleSetDefault(e, collection)} className={`p-1.5 hover:bg-surface2 rounded-[10px] transition-colors ${isDefault ? 'text-accent' : 'text-ink-3 hover:text-accent'}`}><FavoriteIcon filled={isDefault} className="w-3.5 h-3.5" /></FavoriteActionButton>
+                        <FavoriteActionButton tooltip="重命名" onClick={(e) => startRename(e, collection)} className="p-1.5 hover:bg-surface2 rounded-[10px] text-ink-3 hover:text-ink transition-colors"><EditIcon className="w-3.5 h-3.5" /></FavoriteActionButton>
+                        <FavoriteActionButton tooltip={canDelete ? '删除' : '至少保留一个收藏夹'} disabled={!canDelete} onClick={(e) => handleDelete(e, collection)} className={`p-1.5 hover:bg-surface2 rounded-[10px] transition-colors ${canDelete ? 'text-ink-3 hover:text-red-500' : 'text-ink-3/40 cursor-not-allowed'}`}><TrashIcon className="w-3.5 h-3.5" /></FavoriteActionButton>
                       </>
                     )}
                   </div>
@@ -389,7 +389,7 @@ export function ManageCollectionsModal() {
             )})}
           </div>
         </div>
-        <div className="border-t border-gray-200 p-6 dark:border-[#333] shrink-0">
+        <div className="border-t border-line p-6 shrink-0">
           <div className="flex gap-3">
             <input
               value={draft}
@@ -399,13 +399,13 @@ export function ManageCollectionsModal() {
               }}
               type="text"
               placeholder="新建收藏夹..."
-              className="min-w-0 flex-1 rounded-xl border border-gray-300 bg-transparent px-4 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-white/10 dark:text-white dark:focus:border-white/30 dark:focus:ring-white/30"
+              className="min-w-0 flex-1 h-10 rounded-[11px] border border-line bg-surface2 px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-[3px] focus:ring-accent-soft"
             />
-            <button 
-              type="button" 
-              onClick={handleCreate} 
+            <button
+              type="button"
+              onClick={handleCreate}
               disabled={!draft.trim()}
-              className="inline-flex items-center justify-center rounded-xl bg-gray-200 px-5 py-2 text-sm font-medium text-gray-800 transition hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20"
+              className="inline-flex h-10 items-center justify-center rounded-[11px] bg-[linear-gradient(150deg,var(--accent),#e07a1f)] px-5 text-sm font-semibold text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition hover:-translate-y-px disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
             >
               新建
             </button>

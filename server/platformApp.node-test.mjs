@@ -230,3 +230,143 @@ test('self-contained platform supports email auth, exact billing and payment ide
   response = await fetch(`${baseUrl}/api/platform/session`, { headers: { Cookie: cookie } })
   assert.equal(response.status, 401)
 })
+
+async function bootAdmin(t) {
+  const resultDir = await mkdtemp(join(tmpdir(), 'image-studio-shop-'))
+  const db = new PlatformDatabase({ path: ':memory:' })
+  const app = createPlatformApp({
+    env: {
+      NODE_ENV: 'test',
+      PLATFORM_AUTH_SECRET: 'test-secret-with-more-than-thirty-two-characters',
+      PLATFORM_ADMIN_EMAILS: 'admin@example.com',
+      PLATFORM_REGISTER_ENABLED: 'true',
+    },
+    db,
+    fetch: async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    config: {
+      appOrigin: 'http://studio.test',
+      cookieSecure: false,
+      resultDir,
+      relayBaseUrl: 'https://relay.test/v1',
+      relayApiKey: 'server-only-key',
+      imageUnitPriceMicros: 70000,
+      signupCreditMicros: 0,
+      paymentWebhookSecret: 'payment-test-secret',
+    },
+  })
+  app.server.listen(0, '127.0.0.1')
+  await once(app.server, 'listening')
+  const baseUrl = `http://127.0.0.1:${app.server.address().port}`
+  t.after(async () => {
+    await app.close()
+    await rm(resultDir, { recursive: true, force: true })
+  })
+  const originHeaders = { Origin: 'http://studio.test', 'Content-Type': 'application/json' }
+  let r = await fetch(`${baseUrl}/api/platform/auth/verification`, { method: 'POST', headers: originHeaders, body: JSON.stringify({ email: 'admin@example.com' }) })
+  const code = (await r.json()).data.dev_code
+  await fetch(`${baseUrl}/api/platform/auth/register`, { method: 'POST', headers: originHeaders, body: JSON.stringify({ email: 'admin@example.com', password: 'correct horse battery staple', verification_code: code }) })
+  r = await fetch(`${baseUrl}/api/platform/auth/login`, { method: 'POST', headers: originHeaders, body: JSON.stringify({ email: 'admin@example.com', password: 'correct horse battery staple' }) })
+  const cookie = readCookies(r)
+  const csrf = readCookie(cookie, 'image_studio_csrf')
+  r = await fetch(`${baseUrl}/api/platform/session`, { headers: { Cookie: cookie } })
+  const adminId = (await r.json()).data.id
+  return { baseUrl, cookie, csrf, adminId }
+}
+
+test('membership and credit products drive purchases and admin grants over HTTP', async (t) => {
+  const { baseUrl, cookie, csrf, adminId } = await bootAdmin(t)
+  const jsonHeaders = { Origin: 'http://studio.test', Cookie: cookie, 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }
+
+  let r = await fetch(`${baseUrl}/api/platform/admin/products`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ id: 'pro-monthly', kind: 'membership', name: 'Pro 月卡', price: '9.99', duration_days: 30 }) })
+  assert.equal(r.status, 200)
+  r = await fetch(`${baseUrl}/api/platform/admin/products`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ id: 'credits-100', kind: 'credits', name: '100 次', price: '5', credits: 100 }) })
+  assert.equal(r.status, 200)
+  r = await fetch(`${baseUrl}/api/platform/admin/products`, { headers: { Cookie: cookie } })
+  assert.equal((await r.json()).data.length, 2)
+
+  r = await fetch(`${baseUrl}/api/platform/status`)
+  assert.equal((await r.json()).data.image_studio.products.length, 2)
+
+  const buy = (body) => {
+    const raw = JSON.stringify(body)
+    const sig = createHmac('sha256', 'payment-test-secret').update(raw).digest('hex')
+    return fetch(`${baseUrl}/api/platform/payment/webhook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Payment-Signature': sig }, body: raw })
+  }
+
+  r = await buy({ provider: 'pay', order_id: 'o-1', product_id: 'pro-monthly', user_id: adminId, currency: 'USD', status: 'paid' })
+  assert.equal(r.status, 200)
+  assert.equal((await r.json()).data.kind, 'membership')
+  r = await fetch(`${baseUrl}/api/platform/session`, { headers: { Cookie: cookie } })
+  let me = (await r.json()).data
+  assert.equal(me.membership_active, true)
+  assert.ok(me.membership_expires_at > Date.now())
+
+  r = await buy({ provider: 'pay', order_id: 'o-2', product_id: 'credits-100', user_id: adminId, currency: 'USD', status: 'paid' })
+  assert.equal((await r.json()).data.creditsAdded, 100)
+  r = await fetch(`${baseUrl}/api/platform/session`, { headers: { Cookie: cookie } })
+  me = (await r.json()).data
+  assert.equal(me.available_credits, 100)
+
+  r = await fetch(`${baseUrl}/api/platform/admin/users/${adminId}/credits`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ credits: 5, note: 'test grant' }) })
+  assert.equal(r.status, 200)
+  assert.equal((await r.json()).data.available_credits, 105)
+
+  r = await fetch(`${baseUrl}/api/platform/admin/users/${adminId}/membership`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ days: 10, note: 'extend' }) })
+  assert.equal(r.status, 200)
+  assert.equal((await r.json()).data.membership_active, true)
+
+  r = await fetch(`${baseUrl}/api/platform/admin/products/credits-100`, { method: 'DELETE', headers: jsonHeaders })
+  assert.equal((await r.json()).data.deleted, true)
+  r = await fetch(`${baseUrl}/api/platform/admin/products`, { headers: { Cookie: cookie } })
+  assert.equal((await r.json()).data.length, 1)
+
+  // mutations require CSRF even for admins
+  r = await fetch(`${baseUrl}/api/platform/admin/products`, { method: 'POST', headers: { Origin: 'http://studio.test', Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'x', kind: 'credits', name: 'x', price: '1', credits: 1 }) })
+  assert.equal(r.status, 403)
+})
+
+test('admins generate redemption codes and users redeem them over HTTP', async (t) => {
+  const { baseUrl, cookie, csrf, adminId } = await bootAdmin(t)
+  const jsonHeaders = { Origin: 'http://studio.test', Cookie: cookie, 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }
+
+  let r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ credits: 20, membership_days: 3, count: 2, note: 'launch' }) })
+  assert.equal(r.status, 200)
+  const codes = (await r.json()).data.codes
+  assert.equal(codes.length, 2)
+
+  r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes`, { headers: { Cookie: cookie } })
+  assert.equal((await r.json()).data.length, 2)
+
+  // redeem (dash/case-insensitive)
+  r = await fetch(`${baseUrl}/api/platform/redeem`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ code: codes[0].toLowerCase() }) })
+  assert.equal(r.status, 200)
+  let data = (await r.json()).data
+  assert.equal(data.granted.credits, 20)
+  assert.equal(data.available_credits, 20)
+  assert.equal(data.membership_active, true)
+
+  // single use
+  r = await fetch(`${baseUrl}/api/platform/redeem`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ code: codes[0] }) })
+  assert.equal(r.status, 409)
+
+  // generating codes requires admin + CSRF
+  r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes`, { method: 'POST', headers: { Origin: 'http://studio.test', Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ credits: 1, count: 1 }) })
+  assert.equal(r.status, 403)
+
+  assert.ok(adminId)
+})
+
+test('QA regression: login with an unknown email never 500s (null-deref guard)', async (t) => {
+  const { baseUrl } = await bootAdmin(t)
+  // 'not-a-real-password' is the internal dummy-hash plaintext — it previously
+  // made verifyPassword succeed for a null user and crashed on user.status.
+  for (const password of ['not-a-real-password', 'anything-else']) {
+    const r = await fetch(`${baseUrl}/api/platform/auth/login`, {
+      method: 'POST',
+      headers: { Origin: 'http://studio.test', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'ghost@example.com', password }),
+    })
+    assert.equal(r.status, 401)
+    assert.equal((await r.json()).code, 'INVALID_CREDENTIALS')
+  }
+})

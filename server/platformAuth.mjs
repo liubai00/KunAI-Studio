@@ -304,7 +304,7 @@ export class PlatformAuth {
     const normalizedEmail = normalizeEmail(email)
     const user = this.db.findUserByEmail(normalizedEmail)
     const valid = await this.runPasswordHash(() => verifyPassword(password, user?.passwordHash || DUMMY_PASSWORD_HASH))
-    if (!valid || user.status !== 1) throw createError('邮箱或密码错误', 401, 'INVALID_CREDENTIALS')
+    if (!user || !valid || user.status !== 1) throw createError('邮箱或密码错误', 401, 'INVALID_CREDENTIALS')
     this.db.recordLogin(user.id)
     const session = this.db.createSession(user.id, {
       ttlMs: this.sessionTtlMs,

@@ -254,13 +254,13 @@ export default function TaskGrid() {
 
   if (!filteredTasks.length) {
     return (
-      <div className="text-center py-20 text-gray-400 dark:text-gray-500">
+      <div className="text-center py-20 text-ink-3">
         {searchQuery || filterFavorite ? (
           <p className="text-sm">没有找到匹配的任务</p>
         ) : (
           <>
             <svg
-              className="w-16 h-16 mx-auto mb-4 text-gray-200 dark:text-gray-700"
+              className="w-16 h-16 mx-auto mb-4 text-ink-3/50"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -285,9 +285,9 @@ export default function TaskGrid() {
       data-task-grid-root
       className="relative min-h-[50vh]"
     >
-      <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
+      <div ref={gridRef} className="gi-masonry pb-10">
         {filteredTasks.map((task) => (
-          <div key={task.id} className="task-card-wrapper" data-task-id={task.id}>
+          <div key={task.id} className="task-card-wrapper mb-4 break-inside-avoid" data-task-id={task.id}>
             <TaskCard
               task={task}
               onClick={(e) => {

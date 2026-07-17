@@ -6,18 +6,48 @@
 @tailwind utilities;
 
 :root {
-  --background: 60 5% 97%;
-  --foreground: 30 5% 15%;
-  --muted: 40 6% 95%;
-  --muted-foreground: 30 4% 45%;
-  --border: 35 7% 88%;
-  --input: 35 7% 88%;
+  /* Tailwind HSL tokens — warm paper neutrals + amber accent (design light) */
+  --background: 45 18% 96%;
+  --foreground: 40 6% 10%;
+  --muted: 43 15% 93%;
+  --muted-foreground: 33 8% 36%;
+  --border: 40 9% 90%;
+  --input: 40 9% 90%;
   --primary: 38 92% 50%;
   --primary-foreground: 0 0% 100%;
-  --sidebar: 240 5% 96%;
-  --sidebar-foreground: 240 10% 10%;
-  --font-ui-sans: 'HarmonyOS Sans SC', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'Maple Mono', 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+  --sidebar: 43 15% 93%;
+  --sidebar-foreground: 40 6% 10%;
+
+  /* ===== GPT Image Playground design tokens (light) ===== */
+  --bg: #f6f5f2;
+  --hdr-bg: rgba(246, 245, 242, 0.82);
+  --dock-bg: rgba(255, 255, 255, 0.9);
+  --surface: #ffffff;
+  --surface-2: #f1efeb;
+  --line: rgba(24, 23, 20, 0.08);
+  --line-2: rgba(24, 23, 20, 0.15);
+  --text: #1a1917;
+  --text-2: #635e55;
+  --text-3: #9a948a;
+  --accent: #f59e0b;
+  --accent-ink: #b45309;
+  --accent-soft: rgba(245, 158, 11, 0.13);
+  --accent-glow: rgba(245, 158, 11, 0.42);
+  --info: #2f6df0;
+  /* RGB channel triplets so Tailwind opacity modifiers (bg-accent/20, ring-accent/50, text-ink-3/50…) work */
+  --surface-rgb: 255 255 255;
+  --surface-2-rgb: 241 239 235;
+  --text-rgb: 26 25 23;
+  --text-2-rgb: 99 94 85;
+  --text-3-rgb: 154 148 138;
+  --accent-rgb: 245 158 11;
+  --info-rgb: 47 109 240;
+  --shadow-card: 0 1px 2px rgba(24, 23, 20, 0.05), 0 2px 6px rgba(24, 23, 20, 0.045);
+  --shadow-lift: 0 18px 44px -14px rgba(24, 23, 20, 0.22), 0 6px 14px -6px rgba(24, 23, 20, 0.1);
+
+  --font-ui-sans: 'HarmonyOS Sans SC', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --font-display: 'Space Grotesk', 'HarmonyOS Sans SC', 'Noto Sans SC', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Maple Mono', 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
@@ -32,8 +62,8 @@ html {
 body {
   padding: 0;
   min-height: 100vh;
-  background: #f7f7f5;
-  color: #282724;
+  background: var(--bg);
+  color: var(--text);
   -webkit-user-select: none;
   user-select: none;
 }
@@ -53,7 +83,7 @@ body {
 
 [data-platform-shell] {
   min-height: 100vh;
-  background: #f7f7f5;
+  background: var(--bg);
 }
 
 [data-platform-shell] button,
@@ -98,16 +128,43 @@ body.drag-selecting * {
 }
 
 html.dark {
-  --background: 240 10% 4%;
-  --foreground: 0 0% 98%;
-  --muted: 240 4% 16%;
-  --muted-foreground: 240 5% 65%;
-  --border: 240 4% 22%;
-  --input: 240 4% 22%;
-  --primary: 38 92% 50%;
-  --primary-foreground: 0 0% 100%;
-  --sidebar: 240 5% 12%;
-  --sidebar-foreground: 0 0% 98%;
+  /* Tailwind HSL tokens — warm charcoal neutrals + bright amber accent (design dark) */
+  --background: 40 8% 6%;
+  --foreground: 40 20% 94%;
+  --muted: 40 16% 12%;
+  --muted-foreground: 37 8% 61%;
+  --border: 40 7% 15%;
+  --input: 40 7% 15%;
+  --primary: 40 94% 59%;
+  --primary-foreground: 40 40% 8%;
+  --sidebar: 40 16% 12%;
+  --sidebar-foreground: 40 20% 94%;
+
+  /* ===== GPT Image Playground design tokens (dark) ===== */
+  --bg: #100f0e;
+  --hdr-bg: rgba(18, 17, 15, 0.74);
+  --dock-bg: rgba(27, 25, 21, 0.82);
+  --surface: #1a1815;
+  --surface-2: #252118;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-2: rgba(255, 255, 255, 0.17);
+  --text: #f4f2ee;
+  --text-2: #a49e94;
+  --text-3: #726c62;
+  --accent: #f9b234;
+  --accent-ink: #f9b234;
+  --accent-soft: rgba(249, 178, 52, 0.15);
+  --accent-glow: rgba(249, 178, 52, 0.5);
+  --info: #5a8cff;
+  --surface-rgb: 26 24 21;
+  --surface-2-rgb: 37 33 24;
+  --text-rgb: 244 242 238;
+  --text-2-rgb: 164 158 148;
+  --text-3-rgb: 114 108 98;
+  --accent-rgb: 249 178 52;
+  --info-rgb: 90 140 255;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lift: 0 26px 64px -18px rgba(0, 0, 0, 0.72), 0 8px 20px -8px rgba(0, 0, 0, 0.5);
 }
 
 html.dark * {
@@ -115,8 +172,8 @@ html.dark * {
 }
 
 html.dark body {
-  background: #121211;
-  color: #f4f4f3;
+  background: var(--bg);
+  color: var(--text);
 }
 
 .dark .auth-shell {
@@ -132,7 +189,7 @@ html.dark body {
 }
 
 .dark [data-platform-shell] {
-  background: #121211;
+  background: var(--bg);
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -456,9 +513,9 @@ input[type="number"] {
   padding: 0 7px;
   margin: 0 2px;
   border-radius: 6px;
-  background: #eff6ff;
-  color: #2563eb;
-  border: 1px solid #dbeafe;
+  background: rgba(245, 158, 11, 0.13);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.25);
   font-size: inherit;
   font-weight: 600;
   line-height: 1;
@@ -476,25 +533,25 @@ input[type="number"] {
 
 [contenteditable]::selection,
 [contenteditable] *::selection {
-  background: rgba(37, 99, 235, 0.2);
+  background: rgba(245, 158, 11, 0.22);
   color: inherit;
 }
 
 .mention-tag:hover {
-  background: #dbeafe;
+  background: rgba(245, 158, 11, 0.2);
 }
 
 .mention-tag.selected {
-  background: #2563eb;
+  background: #f59e0b;
   color: #ffffff;
-  border-color: #1d4ed8;
-  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.25);
+  border-color: #d97706;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.3);
 }
 
 .dark .mention-tag {
-  background: rgba(59, 130, 246, 0.12);
-  color: #93c5fd;
-  border-color: rgba(59, 130, 246, 0.2);
+  background: rgba(249, 178, 52, 0.15);
+  color: #f9b234;
+  border-color: rgba(249, 178, 52, 0.28);
 }
 
 .dark .mention-tag::selection,
@@ -505,23 +562,186 @@ input[type="number"] {
 
 .dark [contenteditable]::selection,
 .dark [contenteditable] *::selection {
-  background: rgba(59, 130, 246, 0.3);
+  background: rgba(249, 178, 52, 0.3);
   color: inherit;
 }
 
 .dark .mention-tag:hover {
-  background: rgba(59, 130, 246, 0.2);
+  background: rgba(249, 178, 52, 0.25);
 }
 
 .dark .mention-tag.selected {
-  background: #3b82f6;
-  color: #ffffff;
-  border-color: #60a5fa;
-  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.35);
+  background: #f9b234;
+  color: #100f0e;
+  border-color: #f9b234;
+  box-shadow: inset 0 0 0 1px rgba(249, 178, 52, 0.4);
 }
 
 /* 修复 iOS/Webkit 上带圆角的滚动容器内容/滚动条溢出的 bug */
 .ios-rounded-scroll-fix {
   isolation: isolate;
   -webkit-mask-image: -webkit-radial-gradient(white, black);
+}
+
+/* ============================================================
+   GPT Image Playground — design-system primitives (gi-*)
+   Ported from UI/GPT Image Playground.dc.html. Prefixed to
+   avoid collisions with Tailwind / library global classes.
+   ============================================================ */
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Brand mark — amber rounded-square tile with a white aperture ring */
+.gi-brandmark {
+  border-radius: 9px;
+  background: linear-gradient(152deg, var(--accent), #e07a1f);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 5px 14px -3px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  flex: none;
+}
+.gi-aperture {
+  border-radius: 50%;
+  border: 2.5px solid #fff;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.35);
+}
+
+/* Metadata badges shown over images (ratio / size / elapsed) */
+.gi-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font: 500 10.5px/1 var(--font-mono);
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+.gi-badge svg {
+  width: 11px;
+  height: 11px;
+}
+.gi-count {
+  font: 600 11px/1 var(--font-mono);
+  padding: 2px 8px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+.gi-cap {
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+/* Parameter / tag chips (JetBrains Mono) */
+.gi-chip {
+  display: inline-block;
+  font: 500 11.5px/1.35 var(--font-mono);
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.gi-chip-amber {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+.gi-chip-emerald {
+  color: #12a06a;
+  background: rgba(18, 185, 120, 0.12);
+  border-color: transparent;
+}
+html.dark .gi-chip-emerald {
+  color: #5adfa0;
+  background: rgba(74, 222, 158, 0.13);
+}
+
+/* Amber ring spinner */
+.gi-spinner {
+  border-radius: 50%;
+  border: 3px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  animation: gi-spin 0.8s linear infinite;
+}
+@keyframes gi-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Responsive masonry (design uses 4 columns at desktop) */
+.gi-masonry {
+  column-count: 1;
+  column-gap: 16px;
+}
+@media (min-width: 480px) {
+  .gi-masonry {
+    column-count: 2;
+  }
+}
+@media (min-width: 1024px) {
+  .gi-masonry {
+    column-count: 3;
+  }
+}
+@media (min-width: 1280px) {
+  .gi-masonry {
+    column-count: 4;
+  }
+}
+
+/* Tile entrance + running pulse */
+@keyframes gi-fadeup {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.gi-fadeup {
+  animation: gi-fadeup 0.5s both;
+}
+@keyframes gi-runpulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--accent-soft), 0 0 26px -6px var(--accent-glow);
+  }
+  50% {
+    box-shadow: 0 0 0 1px transparent, 0 0 6px -6px transparent;
+  }
+}
+.gi-run {
+  border-color: var(--accent) !important;
+  animation: gi-runpulse 2.2s ease-in-out infinite;
+}
+
+/* Checkerboard backdrop for the mask editor stage */
+.gi-checkerboard {
+  background:
+    linear-gradient(45deg, var(--surface-2) 25%, transparent 25%, transparent 75%, var(--surface-2) 75%) 0 0 / 22px 22px,
+    linear-gradient(45deg, var(--surface-2) 25%, transparent 25%, transparent 75%, var(--surface-2) 75%) 11px 11px / 22px 22px,
+    var(--surface);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gi-fadeup,
+  .gi-run,
+  .gi-spinner {
+    animation: none !important;
+  }
 }

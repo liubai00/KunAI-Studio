@@ -49,6 +49,9 @@ function mapUser(row) {
     balanceMicros: row.balance_micros,
     reservedMicros: row.reserved_micros,
     usedMicros: row.used_micros,
+    imageCredits: row.image_credits ?? 0,
+    reservedCredits: row.reserved_credits ?? 0,
+    membershipExpiresAt: row.membership_expires_at ?? null,
     requestCount: row.request_count,
     authVersion: row.auth_version,
     emailVerifiedAt: row.email_verified_at,
@@ -56,6 +59,61 @@ function mapUser(row) {
     updatedAt: row.updated_at,
     lastLoginAt: row.last_login_at,
   }
+}
+
+function mapProduct(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    kind: row.kind,
+    name: row.name,
+    description: row.description,
+    priceMicros: row.price_micros,
+    durationDays: row.duration_days,
+    credits: row.credits,
+    sortOrder: row.sort_order,
+    active: Boolean(row.active),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+/** A user has an active membership when the expiry timestamp is in the future. */
+export function isMembershipActive(user, now = Date.now()) {
+  const expiry = user?.membershipExpiresAt ?? user?.membership_expires_at ?? null
+  return Boolean(expiry && Number(expiry) > now)
+}
+
+function mapRedemptionCode(row) {
+  if (!row) return null
+  return {
+    code: row.code,
+    credits: row.credits,
+    membershipDays: row.membership_days,
+    balanceMicros: row.balance_micros,
+    note: row.note,
+    expiresAt: row.expires_at ?? null,
+    redeemedBy: row.redeemed_by ?? null,
+    redeemedAt: row.redeemed_at ?? null,
+    createdAt: row.created_at,
+  }
+}
+
+// Unambiguous charset (no 0/O/1/I/L) for human-typed redemption codes.
+const REDEMPTION_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+
+function generateRedemptionCode() {
+  const bytes = randomBytes(12)
+  let raw = ''
+  for (let i = 0; i < 12; i += 1) raw += REDEMPTION_CHARSET[bytes[i] % REDEMPTION_CHARSET.length]
+  return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`
+}
+
+/** Normalize user input (case / spaces / missing dashes) to the canonical XXXX-XXXX-XXXX form. */
+export function canonicalizeRedemptionCode(input) {
+  const clean = String(input || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (clean.length !== 12) return null
+  return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8, 12)}`
 }
 
 export class PlatformDatabase {
@@ -174,10 +232,46 @@ export class PlatformDatabase {
         created_at INTEGER NOT NULL
       );
 
-      PRAGMA user_version = 1;
+      CREATE TABLE IF NOT EXISTS products (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('membership', 'credits')),
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        price_micros INTEGER NOT NULL CHECK (price_micros >= 0),
+        duration_days INTEGER NOT NULL DEFAULT 0 CHECK (duration_days >= 0),
+        credits INTEGER NOT NULL DEFAULT 0 CHECK (credits >= 0),
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS products_active_sort_idx ON products(active, sort_order ASC, price_micros ASC);
+
+      CREATE TABLE IF NOT EXISTS redemption_codes (
+        code TEXT PRIMARY KEY,
+        credits INTEGER NOT NULL DEFAULT 0 CHECK (credits >= 0),
+        membership_days INTEGER NOT NULL DEFAULT 0 CHECK (membership_days >= 0),
+        balance_micros INTEGER NOT NULL DEFAULT 0 CHECK (balance_micros >= 0),
+        note TEXT NOT NULL DEFAULT '',
+        expires_at INTEGER,
+        redeemed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        redeemed_at INTEGER,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS redemption_codes_created_idx ON redemption_codes(created_at DESC);
+
+      PRAGMA user_version = 3;
     `)
     const generationColumns = new Set(this.db.prepare('PRAGMA table_info(generation_jobs)').all().map((column) => column.name))
     if (!generationColumns.has('result_hash')) this.db.exec('ALTER TABLE generation_jobs ADD COLUMN result_hash TEXT')
+    // Membership + credit-wallet columns (added idempotently for existing databases).
+    if (!generationColumns.has('charge_source')) this.db.exec("ALTER TABLE generation_jobs ADD COLUMN charge_source TEXT NOT NULL DEFAULT 'balance'")
+    if (!generationColumns.has('credits_used')) this.db.exec('ALTER TABLE generation_jobs ADD COLUMN credits_used INTEGER NOT NULL DEFAULT 0')
+    const userColumns = new Set(this.db.prepare('PRAGMA table_info(users)').all().map((column) => column.name))
+    if (!userColumns.has('image_credits')) this.db.exec('ALTER TABLE users ADD COLUMN image_credits INTEGER NOT NULL DEFAULT 0')
+    if (!userColumns.has('reserved_credits')) this.db.exec('ALTER TABLE users ADD COLUMN reserved_credits INTEGER NOT NULL DEFAULT 0')
+    if (!userColumns.has('membership_expires_at')) this.db.exec('ALTER TABLE users ADD COLUMN membership_expires_at INTEGER')
   }
 
   close() {
@@ -447,6 +541,18 @@ export class PlatformDatabase {
 
   reserveGeneration({ userId, idempotencyKey, requestHash, priceMicros }) {
     const now = this.now()
+    const insertJob = (chargeSource, jobPrice, creditsUsed) => {
+      const result = this.db.prepare(`
+        INSERT INTO generation_jobs (
+          user_id, idempotency_key, request_hash, status, price_micros,
+          charge_source, credits_used, created_at, updated_at
+        ) VALUES (?, ?, ?, 'reserved', ?, ?, ?, ?, ?)
+      `).run(userId, idempotencyKey, requestHash, jobPrice, chargeSource, creditsUsed, now, now)
+      return {
+        existing: false,
+        job: this.db.prepare('SELECT * FROM generation_jobs WHERE id = ?').get(result.lastInsertRowid),
+      }
+    }
     const run = this.db.transaction(() => {
       const existing = this.db.prepare(`
         SELECT * FROM generation_jobs WHERE user_id = ? AND idempotency_key = ?
@@ -458,23 +564,33 @@ export class PlatformDatabase {
         return { existing: true, job: existing }
       }
 
+      const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(userId)
+      if (!user || Number(user.status) !== 1) {
+        return { error: createError('账户已停用或不存在', 403, 'ACCOUNT_DISABLED') }
+      }
+
+      // Priority: active membership (unlimited, free) → image credits → USD balance.
+      if (user.membership_expires_at && Number(user.membership_expires_at) > now) {
+        return insertJob('membership', 0, 0)
+      }
+
+      const availableCredits = Number(user.image_credits) - Number(user.reserved_credits)
+      if (availableCredits >= 1) {
+        this.db.prepare(`
+          UPDATE users SET reserved_credits = reserved_credits + 1, updated_at = ? WHERE id = ?
+        `).run(now, userId)
+        return insertJob('credits', 0, 1)
+      }
+
       const updated = this.db.prepare(`
         UPDATE users
         SET reserved_micros = reserved_micros + ?, updated_at = ?
         WHERE id = ? AND status = 1 AND balance_micros - reserved_micros >= ?
       `).run(priceMicros, now, userId, priceMicros)
       if (updated.changes !== 1) {
-        return { error: createError('账户余额不足，请先充值', 402, 'INSUFFICIENT_BALANCE') }
+        return { error: createError('额度不足，请开通会员、购买生成次数或充值余额', 402, 'INSUFFICIENT_BALANCE') }
       }
-      const result = this.db.prepare(`
-        INSERT INTO generation_jobs (
-          user_id, idempotency_key, request_hash, status, price_micros, created_at, updated_at
-        ) VALUES (?, ?, ?, 'reserved', ?, ?, ?)
-      `).run(userId, idempotencyKey, requestHash, priceMicros, now, now)
-      return {
-        existing: false,
-        job: this.db.prepare('SELECT * FROM generation_jobs WHERE id = ?').get(result.lastInsertRowid),
-      }
+      return insertJob('balance', priceMicros, 0)
     })
     const result = run()
     if (result.error) throw result.error
@@ -498,21 +614,45 @@ export class PlatformDatabase {
         throw createError('生成任务已结束，无法重复结算', 409, 'JOB_FINISHED')
       }
       const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(job.user_id)
-      if (!user || user.reserved_micros < job.price_micros || user.balance_micros < job.price_micros) {
-        throw createError('生成任务结算状态异常', 500, 'BILLING_STATE_INVALID')
+      const chargeSource = job.charge_source || 'balance'
+      if (chargeSource === 'membership') {
+        // Membership: unlimited generations, no wallet deduction.
+        this.db.prepare(`
+          UPDATE users SET request_count = request_count + 1, updated_at = ? WHERE id = ?
+        `).run(now, job.user_id)
+      } else if (chargeSource === 'credits') {
+        const creditsUsed = Number(job.credits_used) || 1
+        if (!user || user.reserved_credits < creditsUsed || user.image_credits < creditsUsed) {
+          throw createError('生成任务结算状态异常', 500, 'BILLING_STATE_INVALID')
+        }
+        this.db.prepare(`
+          UPDATE users
+          SET image_credits = image_credits - ?, reserved_credits = reserved_credits - ?,
+              request_count = request_count + 1, updated_at = ?
+          WHERE id = ?
+        `).run(creditsUsed, creditsUsed, now, job.user_id)
+        this.db.prepare(`
+          INSERT INTO ledger_entries (
+            user_id, kind, amount_micros, balance_after_micros, reference, description, created_at
+          ) VALUES (?, 'credit_charge', 0, ?, ?, ?, ?)
+        `).run(job.user_id, user.balance_micros, `generation:${job.id}`, `图片生成成功 · 消耗 ${creditsUsed} 次`, now)
+      } else {
+        if (!user || user.reserved_micros < job.price_micros || user.balance_micros < job.price_micros) {
+          throw createError('生成任务结算状态异常', 500, 'BILLING_STATE_INVALID')
+        }
+        const balanceAfter = user.balance_micros - job.price_micros
+        this.db.prepare(`
+          UPDATE users
+          SET balance_micros = ?, reserved_micros = reserved_micros - ?,
+              used_micros = used_micros + ?, request_count = request_count + 1, updated_at = ?
+          WHERE id = ?
+        `).run(balanceAfter, job.price_micros, job.price_micros, now, job.user_id)
+        this.db.prepare(`
+          INSERT INTO ledger_entries (
+            user_id, kind, amount_micros, balance_after_micros, reference, description, created_at
+          ) VALUES (?, 'image_charge', ?, ?, ?, ?, ?)
+        `).run(job.user_id, -job.price_micros, balanceAfter, `generation:${job.id}`, '图片生成成功', now)
       }
-      const balanceAfter = user.balance_micros - job.price_micros
-      this.db.prepare(`
-        UPDATE users
-        SET balance_micros = ?, reserved_micros = reserved_micros - ?,
-            used_micros = used_micros + ?, request_count = request_count + 1, updated_at = ?
-        WHERE id = ?
-      `).run(balanceAfter, job.price_micros, job.price_micros, now, job.user_id)
-      this.db.prepare(`
-        INSERT INTO ledger_entries (
-          user_id, kind, amount_micros, balance_after_micros, reference, description, created_at
-        ) VALUES (?, 'image_charge', ?, ?, ?, ?, ?)
-      `).run(job.user_id, -job.price_micros, balanceAfter, `generation:${job.id}`, '图片生成成功', now)
       this.db.prepare(`
         UPDATE generation_jobs
         SET status = 'charged', result_path = ?, result_hash = ?, result_content_type = ?,
@@ -529,11 +669,17 @@ export class PlatformDatabase {
     const run = this.db.transaction(() => {
       const job = this.db.prepare('SELECT * FROM generation_jobs WHERE id = ?').get(jobId)
       if (!job || job.status === 'failed' || job.status === 'charged') return job
-      this.db.prepare(`
-        UPDATE users
-        SET reserved_micros = MAX(0, reserved_micros - ?), updated_at = ?
-        WHERE id = ?
-      `).run(job.price_micros, now, job.user_id)
+      const chargeSource = job.charge_source || 'balance'
+      if (chargeSource === 'credits') {
+        this.db.prepare(`
+          UPDATE users SET reserved_credits = MAX(0, reserved_credits - ?), updated_at = ? WHERE id = ?
+        `).run(Number(job.credits_used) || 1, now, job.user_id)
+      } else if (chargeSource === 'balance') {
+        this.db.prepare(`
+          UPDATE users SET reserved_micros = MAX(0, reserved_micros - ?), updated_at = ? WHERE id = ?
+        `).run(job.price_micros, now, job.user_id)
+      }
+      // membership jobs freeze nothing, so there is nothing to refund.
       this.db.prepare(`
         UPDATE generation_jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?
       `).run(String(message || '生成失败').slice(0, 500), now, job.id)
@@ -546,6 +692,7 @@ export class PlatformDatabase {
     const now = this.now()
     const run = this.db.transaction(() => {
       this.db.prepare('UPDATE users SET reserved_micros = 0 WHERE reserved_micros > 0').run()
+      this.db.prepare('UPDATE users SET reserved_credits = 0 WHERE reserved_credits > 0').run()
       this.db.prepare(`
         UPDATE generation_jobs
         SET status = 'failed', error = '服务重启，未完成任务已释放额度', updated_at = ?
@@ -568,31 +715,271 @@ export class PlatformDatabase {
     `).all(userId, Math.max(1, Math.min(100, Number(limit) || 30)))
   }
 
-  creditPayment({ provider, externalId, email, amountMicros, payloadHash }) {
-    const normalizedEmail = normalizeEmail(email)
+  // Internal helpers — must be called inside an open transaction.
+  applyMembershipDays(userId, days, now) {
+    const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(userId)
+    if (!user) throw createError('账户不存在', 404, 'USER_NOT_FOUND')
+    // Extend from the later of "now" and the current expiry so stacking purchases add up.
+    const base = Math.max(Number(user.membership_expires_at) || now, now)
+    const expiry = base + days * 24 * 60 * 60 * 1000
+    this.db.prepare('UPDATE users SET membership_expires_at = ?, updated_at = ? WHERE id = ?').run(expiry, now, userId)
+    return expiry
+  }
+
+  applyCredits(userId, credits, now) {
+    this.db.prepare('UPDATE users SET image_credits = image_credits + ?, updated_at = ? WHERE id = ?').run(credits, now, userId)
+  }
+
+  insertLedger(userId, kind, amountMicros, balanceAfterMicros, reference, description, now) {
+    this.db.prepare(`
+      INSERT INTO ledger_entries (
+        user_id, kind, amount_micros, balance_after_micros, reference, description, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, kind, amountMicros, balanceAfterMicros, reference, description, now)
+  }
+
+  creditPayment({ provider, externalId, email, userId, amountMicros, productId, payloadHash }) {
     const now = this.now()
     const run = this.db.transaction(() => {
       const existing = this.db.prepare(`
         SELECT id FROM payment_events WHERE provider = ? AND external_id = ?
       `).get(provider, externalId)
       if (existing) return { duplicate: true }
-      const user = this.db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail)
+
+      let user = null
+      if (userId != null && userId !== '') {
+        user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(Number(userId))
+      }
+      if (!user && email) {
+        user = this.db.prepare('SELECT * FROM users WHERE email = ?').get(normalizeEmail(email))
+      }
       if (!user) throw createError('支付事件对应的账户不存在', 404, 'USER_NOT_FOUND')
+
+      const reference = `payment:${provider}:${externalId}`
+
+      // Product purchase: grant membership or credits based on the product definition.
+      if (productId) {
+        const product = this.db.prepare('SELECT * FROM products WHERE id = ?').get(String(productId))
+        if (!product) throw createError('支付对应的商品不存在', 404, 'PRODUCT_NOT_FOUND')
+        if (!(product.price_micros > 0)) throw createError('商品价格无效', 400, 'INVALID_PRODUCT_PRICE')
+        const event = this.db.prepare(`
+          INSERT INTO payment_events (provider, external_id, user_id, amount_micros, payload_hash, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(provider, externalId, user.id, product.price_micros, payloadHash, now)
+        if (product.kind === 'membership') {
+          const expiry = this.applyMembershipDays(user.id, product.duration_days, now)
+          this.insertLedger(user.id, 'membership_payment', 0, user.balance_micros, reference, `购买会员：${product.name}`, now)
+          return { duplicate: false, eventId: Number(event.lastInsertRowid), userId: user.id, kind: 'membership', membershipExpiresAt: expiry }
+        }
+        this.applyCredits(user.id, product.credits, now)
+        this.insertLedger(user.id, 'credits_payment', 0, user.balance_micros, reference, `购买次数包：${product.name}（+${product.credits} 次）`, now)
+        return { duplicate: false, eventId: Number(event.lastInsertRowid), userId: user.id, kind: 'credits', creditsAdded: product.credits }
+      }
+
+      // Legacy: raw USD balance top-up.
+      if (!(amountMicros > 0)) throw createError('充值金额无效', 400, 'INVALID_AMOUNT')
       const balanceAfter = user.balance_micros + amountMicros
       const event = this.db.prepare(`
-        INSERT INTO payment_events (
-          provider, external_id, user_id, amount_micros, payload_hash, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO payment_events (provider, external_id, user_id, amount_micros, payload_hash, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
       `).run(provider, externalId, user.id, amountMicros, payloadHash, now)
       this.db.prepare('UPDATE users SET balance_micros = ?, updated_at = ? WHERE id = ?').run(balanceAfter, now, user.id)
-      this.db.prepare(`
-        INSERT INTO ledger_entries (
-          user_id, kind, amount_micros, balance_after_micros, reference, description, created_at
-        ) VALUES (?, 'payment_credit', ?, ?, ?, ?, ?)
-      `).run(user.id, amountMicros, balanceAfter, `payment:${provider}:${externalId}`, '支付充值', now)
+      this.insertLedger(user.id, 'payment_credit', amountMicros, balanceAfter, reference, '支付充值', now)
       return { duplicate: false, eventId: Number(event.lastInsertRowid), userId: user.id, balanceMicros: balanceAfter }
     })
     return run()
+  }
+
+  listProducts({ activeOnly = false } = {}) {
+    const sql = activeOnly
+      ? 'SELECT * FROM products WHERE active = 1 ORDER BY sort_order ASC, price_micros ASC'
+      : 'SELECT * FROM products ORDER BY sort_order ASC, price_micros ASC'
+    return this.db.prepare(sql).all().map(mapProduct)
+  }
+
+  getProduct(id) {
+    return mapProduct(this.db.prepare('SELECT * FROM products WHERE id = ?').get(String(id)))
+  }
+
+  upsertProduct(actorUserId, input) {
+    const id = String(input.id || '').trim()
+    if (!/^[a-z0-9][a-z0-9_-]{1,63}$/i.test(id)) throw createError('商品 ID 只能包含字母、数字、- 和 _，且以字母或数字开头', 400, 'INVALID_PRODUCT_ID')
+    const kind = input.kind
+    if (!['membership', 'credits'].includes(kind)) throw createError('商品类型无效', 400, 'INVALID_PRODUCT_KIND')
+    const name = String(input.name || '').trim()
+    if (!name || name.length > 100) throw createError('商品名称无效', 400, 'INVALID_PRODUCT_NAME')
+    const priceMicros = Number(input.priceMicros)
+    if (!Number.isSafeInteger(priceMicros) || priceMicros < 0) throw createError('商品价格无效', 400, 'INVALID_PRODUCT_PRICE')
+    const durationDays = Math.trunc(Number(input.durationDays) || 0)
+    const credits = Math.trunc(Number(input.credits) || 0)
+    if (!Number.isSafeInteger(durationDays) || durationDays < 0 || durationDays > 100000) throw createError('会员天数无效', 400, 'INVALID_DURATION')
+    if (!Number.isSafeInteger(credits) || credits < 0 || credits > 100000000) throw createError('次数数值无效', 400, 'INVALID_CREDITS')
+    if (kind === 'membership' && durationDays <= 0) throw createError('会员商品必须设置有效天数', 400, 'INVALID_DURATION')
+    if (kind === 'credits' && credits <= 0) throw createError('次数商品必须设置次数', 400, 'INVALID_CREDITS')
+    const description = String(input.description || '').slice(0, 500)
+    const sortOrder = Math.trunc(Number(input.sortOrder) || 0)
+    // On edit, an omitted `active` must preserve the existing state (never silently re-list a hidden product).
+    const existingProduct = this.getProduct(id)
+    const active = input.active === undefined ? (existingProduct ? (existingProduct.active ? 1 : 0) : 1) : (input.active ? 1 : 0)
+    const now = this.now()
+    const run = this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO products (id, kind, name, description, price_micros, duration_days, credits, sort_order, active, created_at, updated_at)
+        VALUES (@id, @kind, @name, @description, @priceMicros, @durationDays, @credits, @sortOrder, @active, @now, @now)
+        ON CONFLICT(id) DO UPDATE SET
+          kind = @kind, name = @name, description = @description, price_micros = @priceMicros,
+          duration_days = @durationDays, credits = @credits, sort_order = @sortOrder, active = @active, updated_at = @now
+      `).run({ id, kind, name, description, priceMicros, durationDays, credits, sortOrder, active, now })
+      this.db.prepare(`
+        INSERT INTO audit_logs (actor_user_id, action, details, created_at) VALUES (?, 'product_upserted', ?, ?)
+      `).run(actorUserId, JSON.stringify({ id, kind, priceMicros, durationDays, credits, active }), now)
+      return this.getProduct(id)
+    })
+    return run()
+  }
+
+  deleteProduct(actorUserId, id) {
+    const now = this.now()
+    const run = this.db.transaction(() => {
+      const info = this.db.prepare('DELETE FROM products WHERE id = ?').run(String(id))
+      if (info.changes) {
+        this.db.prepare(`
+          INSERT INTO audit_logs (actor_user_id, action, details, created_at) VALUES (?, 'product_deleted', ?, ?)
+        `).run(actorUserId, JSON.stringify({ id: String(id) }), now)
+      }
+      return { deleted: info.changes > 0 }
+    })
+    return run()
+  }
+
+  adminGrantMembership(actorUserId, targetUserId, days, note = '') {
+    const grantDays = Math.trunc(Number(days))
+    if (!Number.isSafeInteger(grantDays) || grantDays <= 0) throw createError('会员天数无效', 400, 'INVALID_DURATION')
+    const now = this.now()
+    const run = this.db.transaction(() => {
+      const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(targetUserId)
+      if (!user) throw createError('账户不存在', 404, 'USER_NOT_FOUND')
+      const expiry = this.applyMembershipDays(targetUserId, grantDays, now)
+      const ref = `admin_membership:${actorUserId}:${targetUserId}:${now}:${randomBytes(6).toString('hex')}`
+      this.insertLedger(targetUserId, 'membership_grant', 0, user.balance_micros, ref, String(note || `管理员开通会员 ${grantDays} 天`).slice(0, 200), now)
+      this.db.prepare(`
+        INSERT INTO audit_logs (actor_user_id, target_user_id, action, details, created_at)
+        VALUES (?, ?, 'membership_granted', ?, ?)
+      `).run(actorUserId, targetUserId, JSON.stringify({ days: grantDays, expiry, note }), now)
+      return this.getUserById(targetUserId)
+    })
+    return run()
+  }
+
+  adminGrantCredits(actorUserId, targetUserId, credits, note = '') {
+    const grantCredits = Math.trunc(Number(credits))
+    if (!Number.isSafeInteger(grantCredits) || grantCredits === 0) throw createError('次数无效', 400, 'INVALID_CREDITS')
+    const now = this.now()
+    const run = this.db.transaction(() => {
+      const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(targetUserId)
+      if (!user) throw createError('账户不存在', 404, 'USER_NOT_FOUND')
+      if (user.image_credits + grantCredits < user.reserved_credits) {
+        throw createError('调整后次数不能低于已冻结次数', 400, 'CREDITS_TOO_LOW')
+      }
+      this.applyCredits(targetUserId, grantCredits, now)
+      const ref = `admin_credits:${actorUserId}:${targetUserId}:${now}:${randomBytes(6).toString('hex')}`
+      const desc = note || (grantCredits > 0 ? `管理员赠送 ${grantCredits} 次` : `管理员扣减 ${-grantCredits} 次`)
+      this.insertLedger(targetUserId, 'credit_grant', 0, user.balance_micros, ref, String(desc).slice(0, 200), now)
+      this.db.prepare(`
+        INSERT INTO audit_logs (actor_user_id, target_user_id, action, details, created_at)
+        VALUES (?, ?, 'credits_granted', ?, ?)
+      `).run(actorUserId, targetUserId, JSON.stringify({ credits: grantCredits, note }), now)
+      return this.getUserById(targetUserId)
+    })
+    return run()
+  }
+
+  createRedemptionCodes(actorUserId, options = {}) {
+    const credits = Math.trunc(Number(options.credits) || 0)
+    const membershipDays = Math.trunc(Number(options.membershipDays) || 0)
+    const balanceMicros = Math.trunc(Number(options.balanceMicros) || 0)
+    // Distinguish an omitted count (→ default 1) from an explicit 0 (→ rejected below).
+    const count = options.count == null || options.count === '' ? 1 : Math.trunc(Number(options.count))
+    const note = String(options.note || '').slice(0, 200)
+    const expiresAt = options.expiresAt ? Number(options.expiresAt) : null
+    if (credits < 0 || membershipDays < 0 || balanceMicros < 0) throw createError('数值不能为负', 400, 'INVALID_VALUE')
+    if (credits === 0 && membershipDays === 0 && balanceMicros === 0) throw createError('兑换码至少要包含次数、会员天数或余额之一', 400, 'EMPTY_REDEMPTION')
+    if (!Number.isSafeInteger(count) || count < 1 || count > 1000) throw createError('生成数量需在 1–1000 之间', 400, 'INVALID_COUNT')
+    const now = this.now()
+    const insert = this.db.prepare(`
+      INSERT INTO redemption_codes (code, credits, membership_days, balance_micros, note, expires_at, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    const run = this.db.transaction(() => {
+      const codes = []
+      for (let i = 0; i < count; i += 1) {
+        let inserted = false
+        for (let attempt = 0; attempt < 8 && !inserted; attempt += 1) {
+          const code = generateRedemptionCode()
+          try {
+            insert.run(code, credits, membershipDays, balanceMicros, note, expiresAt, actorUserId, now)
+            codes.push(code)
+            inserted = true
+          } catch (err) {
+            if (!/UNIQUE/i.test(String(err && err.message))) throw err
+          }
+        }
+        if (!inserted) throw createError('生成兑换码失败，请重试', 500, 'CODE_GEN_FAILED')
+      }
+      this.db.prepare(`
+        INSERT INTO audit_logs (actor_user_id, action, details, created_at)
+        VALUES (?, 'redemption_codes_created', ?, ?)
+      `).run(actorUserId, JSON.stringify({ count, credits, membershipDays, balanceMicros }), now)
+      return codes
+    })
+    return run()
+  }
+
+  redeemCode(userId, code) {
+    const canonical = canonicalizeRedemptionCode(code)
+    if (!canonical) throw createError('兑换码格式无效', 400, 'INVALID_CODE_FORMAT')
+    const now = this.now()
+    const run = this.db.transaction(() => {
+      const row = this.db.prepare('SELECT * FROM redemption_codes WHERE code = ?').get(canonical)
+      if (!row) throw createError('兑换码不存在', 404, 'CODE_NOT_FOUND')
+      if (row.redeemed_by) throw createError('该兑换码已被使用', 409, 'CODE_ALREADY_USED')
+      if (row.expires_at && row.expires_at <= now) throw createError('兑换码已过期', 400, 'CODE_EXPIRED')
+      const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(userId)
+      if (!user || Number(user.status) !== 1) throw createError('账户已停用或不存在', 403, 'ACCOUNT_DISABLED')
+
+      const granted = {}
+      if (row.credits > 0) {
+        this.applyCredits(userId, row.credits, now)
+        this.insertLedger(userId, 'redeem_credits', 0, user.balance_micros, `redeem:${canonical}:credits`, `兑换 ${row.credits} 次生成额度`, now)
+        granted.credits = row.credits
+      }
+      if (row.membership_days > 0) {
+        granted.membershipExpiresAt = this.applyMembershipDays(userId, row.membership_days, now)
+        this.insertLedger(userId, 'redeem_membership', 0, user.balance_micros, `redeem:${canonical}:membership`, `兑换会员 ${row.membership_days} 天`, now)
+        granted.membershipDays = row.membership_days
+      }
+      if (row.balance_micros > 0) {
+        const balanceAfter = user.balance_micros + row.balance_micros
+        this.db.prepare('UPDATE users SET balance_micros = ?, updated_at = ? WHERE id = ?').run(balanceAfter, now, userId)
+        this.insertLedger(userId, 'redeem_balance', row.balance_micros, balanceAfter, `redeem:${canonical}:balance`, '兑换余额', now)
+        granted.balanceMicros = row.balance_micros
+      }
+      this.db.prepare('UPDATE redemption_codes SET redeemed_by = ?, redeemed_at = ? WHERE code = ?').run(userId, now, canonical)
+      this.db.prepare(`
+        INSERT INTO audit_logs (actor_user_id, target_user_id, action, details, created_at)
+        VALUES (?, ?, 'redemption_redeemed', ?, ?)
+      `).run(userId, userId, JSON.stringify({ code: canonical, granted }), now)
+      return { user: this.getUserById(userId), granted }
+    })
+    return run()
+  }
+
+  listRedemptionCodes(options = {}) {
+    const limit = Math.max(1, Math.min(500, Number(options.limit) || 100))
+    const rows = options.unusedOnly
+      ? this.db.prepare('SELECT * FROM redemption_codes WHERE redeemed_by IS NULL ORDER BY created_at DESC LIMIT ?').all(limit)
+      : this.db.prepare('SELECT * FROM redemption_codes ORDER BY created_at DESC LIMIT ?').all(limit)
+    return rows.map(mapRedemptionCode)
   }
 
   listUsers(search = '', limit = 100) {
@@ -642,6 +1029,10 @@ export class PlatformDatabase {
     if (![1, 10].includes(role)) throw createError('角色只能设置为普通用户或管理员', 400, 'INVALID_ROLE')
     if (![0, 1].includes(status)) throw createError('账户状态无效', 400, 'INVALID_STATUS')
     if (!group || group.length > 64) throw createError('用户组无效', 400, 'INVALID_GROUP')
+    // No-op edit: nothing actually changed → don't bump auth_version or revoke sessions.
+    if (role === target.role && status === target.status && group === target.group) {
+      return target
+    }
     if (actorUserId === targetUserId && (role !== target.role || status !== target.status || group !== target.group)) {
       throw createError('不能修改自己的角色、状态或用户组', 400, 'SELF_LOCKOUT')
     }

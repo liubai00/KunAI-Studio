@@ -13,9 +13,8 @@ function FolderIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
-function CoverThumbnail({ task }: { task?: TaskRecord }) {
+function CoverThumbnail({ imageId }: { imageId: string }) {
   const [src, setSrc] = useState('')
-  const imageId = task?.outputImages?.[0]
 
   useEffect(() => {
     setSrc('')
@@ -34,17 +33,12 @@ function CoverThumbnail({ task }: { task?: TaskRecord }) {
   }, [imageId])
 
   if (src) return <img src={src} alt="" className="h-full w-full object-cover" />
-  return (
-    <div className="flex h-full w-full items-center justify-center bg-yellow-50 text-yellow-500 dark:bg-[#2a2211] dark:text-yellow-500">
-      <FavoriteIcon filled className="h-8 w-8 opacity-80" />
-    </div>
-  )
+  return <div className="h-full w-full bg-surface2" />
 }
 
 
 export function FavoriteCollectionOverviewCard({
   card,
-  coverTask,
   isVirtualAll,
   isDefault,
   canDelete,
@@ -62,7 +56,6 @@ export function FavoriteCollectionOverviewCard({
   suppressClickUntilRef,
 }: {
   card: CollectionCard
-  coverTask?: TaskRecord
   isVirtualAll: boolean
   isDefault: boolean
   canDelete: boolean
@@ -191,14 +184,20 @@ export function FavoriteCollectionOverviewCard({
   const showSwipeAction = swipeActionActive
   const swipeBgClass = showSwipeAction
     ? swipeStartedSelected
-      ? 'bg-gray-500 dark:bg-gray-600'
-      : 'bg-blue-500'
-    : 'bg-gray-200 dark:bg-gray-700'
+      ? 'bg-surface2'
+      : 'bg-accent'
+    : 'bg-surface2'
+
+  const coverImageIds = [...card.tasks]
+    .filter((task) => task.outputImages?.length)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .flatMap((task) => task.outputImages || [])
+    .slice(0, 4)
 
   return (
-    <div className="relative rounded-xl">
-      <div className={`absolute inset-0 rounded-xl flex items-center transition-opacity duration-200 pointer-events-none ${isSwiping || swipeDirection !== 0 || swipeActionActive ? 'opacity-100' : 'opacity-0'} ${swipeBgClass} ${swipeDirection > 0 ? 'justify-start pl-6' : 'justify-end pr-6'}`}>
-        <svg className={`w-8 h-8 transition-transform duration-150 ${showSwipeAction ? 'scale-110 text-white' : 'scale-90 text-white/60'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div className="relative rounded-2xl">
+      <div className={`absolute inset-0 rounded-2xl flex items-center transition-opacity duration-200 pointer-events-none ${isSwiping || swipeDirection !== 0 || swipeActionActive ? 'opacity-100' : 'opacity-0'} ${swipeBgClass} ${swipeDirection > 0 ? 'justify-start pl-6' : 'justify-end pr-6'}`}>
+        <svg className={`w-8 h-8 transition-transform duration-150 ${showSwipeAction ? (swipeStartedSelected ? 'scale-110 text-ink-2' : 'scale-110 text-white') : 'scale-90 text-ink-3'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           {swipeStartedSelected && showSwipeAction ? (
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           ) : (
@@ -208,7 +207,7 @@ export function FavoriteCollectionOverviewCard({
       </div>
       <article
         ref={cardRef}
-        className={`relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer touch-pan-y will-change-transform duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${!isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'} ${isSelected ? 'border-blue-500 shadow-md ring-2 ring-blue-500/50' : 'border-gray-200 dark:border-white/[0.08] hover:border-gray-300 dark:hover:border-white/[0.18]'}`}
+        className={`group relative flex flex-col bg-surface rounded-2xl border overflow-hidden cursor-pointer touch-pan-y will-change-transform duration-200 hover:-translate-y-1 hover:shadow-lift ${!isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'} ${isSelected ? 'border-accent shadow-card ring-2 ring-accent/40' : 'border-line shadow-card hover:border-line2'}`}
         onClick={(e) => {
           if (Date.now() < suppressClickUntilRef.current || Date.now() < suppressSwipeClickUntilRef.current) {
             e.preventDefault()
@@ -228,82 +227,92 @@ export function FavoriteCollectionOverviewCard({
         onTouchEnd={handleTouchEnd}
         onTouchCancel={resetSwipe}
       >
-        <div className="flex h-40">
-          <div className="w-40 min-w-[10rem] h-full bg-gray-100 dark:bg-black/20 relative flex items-center justify-center overflow-hidden flex-shrink-0">
-            <CoverThumbnail task={coverTask} />
-          </div>
-          <div className="flex-1 p-3 flex flex-col min-w-0">
-            <div className="flex-1 min-h-0 mb-2 overflow-hidden">
-              <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-gray-100 mb-2">
-                {isVirtualAll ? <FavoriteIcon filled className="h-4 w-4 shrink-0 text-yellow-500" /> : <FolderIcon className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-400" />}
-                {editingId === card.id ? (
-                  <input
-                    type="text"
-                    className="h-6 min-w-0 flex-1 rounded border border-blue-400/50 bg-white px-1.5 py-0 text-[14px] leading-6 text-gray-900 shadow-sm outline-none focus:border-blue-500 dark:border-white/20 dark:bg-black/20 dark:text-white dark:focus:border-white/40"
-                    value={editingName}
-                    onChange={(e) => setEditingName(e.target.value)}
-                    onKeyDown={handleRenameKeyDown}
-                    onClick={(e) => e.stopPropagation()}
-                    autoFocus
-                    onBlur={confirmRename}
-                  />
-                ) : (
-                  <span className="truncate" title={card.name}>{card.name}</span>
-                )}
+        <div className="relative grid aspect-[16/10] grid-cols-2 grid-rows-2 gap-[2px] overflow-hidden bg-line">
+          {coverImageIds.length === 0 ? (
+            <div className="col-span-2 row-span-2 flex items-center justify-center bg-accent-soft text-accent">
+              <FavoriteIcon filled className="h-8 w-8 opacity-80" />
+            </div>
+          ) : coverImageIds.length === 1 ? (
+            <div className="col-span-2 row-span-2 overflow-hidden bg-surface2">
+              <CoverThumbnail imageId={coverImageIds[0]} />
+            </div>
+          ) : (
+            Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="overflow-hidden bg-surface2">
+                {coverImageIds[index] ? <CoverThumbnail imageId={coverImageIds[index]} /> : null}
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{card.tasks.length} 条任务</p>
-            </div>
-            <div className="mt-auto flex items-center justify-end gap-1">
-              {!isVirtualAll && card.collection && (
-                <>
-                  <FavoriteActionButton
-                    tooltip={isDefault ? '取消默认收藏夹' : '设为默认收藏夹'}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleSetDefault(card.collection!)
-                    }}
-                    className={`p-1.5 rounded-md transition ${isDefault ? 'text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-500/10' : 'text-gray-400 hover:text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-500/10'}`}
-                  >
-                    <FavoriteIcon filled={isDefault} className="w-4 h-4" />
-                  </FavoriteActionButton>
-                  {editingId === card.id ? (
-                    <FavoriteActionButton
-                      tooltip="确认"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        confirmRename()
-                      }}
-                      className="p-1.5 rounded-md hover:bg-green-50 dark:hover:bg-green-950/30 text-green-500 hover:text-green-600 dark:text-green-400 dark:hover:text-green-300 transition"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </FavoriteActionButton>
-                  ) : (
-                    <FavoriteActionButton
-                      tooltip="编辑名称"
-                      onClick={(e) => startRename(e, card.collection!)}
-                      className="p-1.5 rounded-md hover:bg-green-50 dark:hover:bg-green-950/30 text-gray-400 hover:text-green-500 transition"
-                    >
-                      <EditIcon className="w-4 h-4" />
-                    </FavoriteActionButton>
-                  )}
-                  <FavoriteActionButton
-                    tooltip={canDelete ? '删除收藏夹' : '至少保留一个收藏夹'}
-                    disabled={!canDelete}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleDelete(card.collection!, card.tasks)
-                    }}
-                    className={`p-1.5 rounded-md transition ${canDelete ? 'hover:bg-red-50 dark:hover:bg-red-950/30 text-gray-400 hover:text-red-500' : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'}`}
-                  >
-                    <TrashIcon className="w-4 h-4" />
-                  </FavoriteActionButton>
-                </>
+            ))
+          )}
+          {!isVirtualAll && card.collection && (
+            <div className={`absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-[10px] bg-[rgba(12,11,9,0.55)] p-0.5 backdrop-blur-sm transition-opacity ${editingId === card.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}>
+              <FavoriteActionButton
+                tooltip={isDefault ? '取消默认收藏夹' : '设为默认收藏夹'}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleSetDefault(card.collection!)
+                }}
+                className={`rounded-[7px] p-1.5 transition-colors ${isDefault ? 'text-accent' : 'text-white/70 hover:bg-white/10 hover:text-accent'}`}
+              >
+                <FavoriteIcon filled={isDefault} className="w-4 h-4" />
+              </FavoriteActionButton>
+              {editingId === card.id ? (
+                <FavoriteActionButton
+                  tooltip="确认"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    confirmRename()
+                  }}
+                  className="rounded-[7px] p-1.5 text-emerald-400 hover:bg-white/10 hover:text-emerald-300 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </FavoriteActionButton>
+              ) : (
+                <FavoriteActionButton
+                  tooltip="编辑名称"
+                  onClick={(e) => startRename(e, card.collection!)}
+                  className="rounded-[7px] p-1.5 text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                >
+                  <EditIcon className="w-4 h-4" />
+                </FavoriteActionButton>
               )}
+              <FavoriteActionButton
+                tooltip={canDelete ? '删除收藏夹' : '至少保留一个收藏夹'}
+                disabled={!canDelete}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleDelete(card.collection!, card.tasks)
+                }}
+                className={`rounded-[7px] p-1.5 transition-colors ${canDelete ? 'text-white/70 hover:bg-white/10 hover:text-red-400' : 'text-white/30 cursor-not-allowed'}`}
+              >
+                <TrashIcon className="w-4 h-4" />
+              </FavoriteActionButton>
             </div>
+          )}
+        </div>
+        <div className="flex items-center justify-between gap-2.5 px-3.5 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            {isVirtualAll ? <FavoriteIcon filled className="h-4 w-4 shrink-0 text-accent" /> : <FolderIcon className="h-4 w-4 shrink-0 text-ink-3" />}
+            {editingId === card.id ? (
+              <input
+                type="text"
+                className="h-6 min-w-0 flex-1 rounded-[7px] border border-line2 bg-surface px-1.5 py-0 text-[13.5px] font-semibold leading-6 text-ink shadow-sm outline-none focus:border-accent focus:ring-[3px] focus:ring-accent-soft"
+                value={editingName}
+                onChange={(e) => setEditingName(e.target.value)}
+                onKeyDown={handleRenameKeyDown}
+                onClick={(e) => e.stopPropagation()}
+                autoFocus
+                onBlur={confirmRename}
+              />
+            ) : (
+              <span className="truncate text-[13.5px] font-semibold text-ink" title={card.name}>{card.name}</span>
+            )}
           </div>
+          <span className={`flex-none rounded-full px-2 py-[3px] font-mono text-[11px] font-medium ${isVirtualAll ? 'bg-accent-soft text-accent-ink' : 'bg-surface2 text-ink-2'}`}>
+            {card.tasks.length}
+          </span>
         </div>
       </article>
     </div>

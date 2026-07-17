@@ -11,7 +11,7 @@ import {
   getCsrfToken,
   getSessionToken,
 } from './platformAuth.mjs'
-import { PlatformDatabase, parseMoneyToMicros } from './platformDb.mjs'
+import { PlatformDatabase, isMembershipActive, parseMoneyToMicros } from './platformDb.mjs'
 import {
   PlatformGateway,
   createHttpError,
@@ -134,8 +134,42 @@ function serializeUser(user, gateway) {
     quota: user.balanceMicros,
     reserved_quota: user.reservedMicros,
     used_quota: user.usedMicros,
+    image_credits: user.imageCredits ?? 0,
+    reserved_credits: user.reservedCredits ?? 0,
+    available_credits: Math.max(0, (user.imageCredits ?? 0) - (user.reservedCredits ?? 0)),
+    membership_expires_at: user.membershipExpiresAt ?? null,
+    membership_active: isMembershipActive(user, Date.now()),
     request_count: user.requestCount,
     image_studio_capabilities: gateway.getCapabilities(user),
+  }
+}
+
+function serializeProduct(product) {
+  return {
+    id: product.id,
+    kind: product.kind,
+    name: product.name,
+    description: product.description,
+    price: product.priceMicros / 1000000,
+    price_micros: product.priceMicros,
+    duration_days: product.durationDays,
+    credits: product.credits,
+    sort_order: product.sortOrder,
+    active: product.active,
+  }
+}
+
+function serializeRedemptionCode(code) {
+  return {
+    code: code.code,
+    credits: code.credits,
+    membership_days: code.membershipDays,
+    balance: code.balanceMicros / 1000000,
+    note: code.note,
+    expires_at: code.expiresAt,
+    redeemed_by: code.redeemedBy,
+    redeemed_at: code.redeemedAt,
+    created_at: code.createdAt,
   }
 }
 
@@ -256,15 +290,24 @@ export function createPlatformApp(options = {}) {
     }
     if (payload.status !== 'paid') throw createHttpError('仅接受已支付事件', 400, 'PAYMENT_NOT_PAID')
     if (String(payload.currency || 'USD').toUpperCase() !== 'USD') throw createHttpError('支付币种不受支持', 400, 'UNSUPPORTED_CURRENCY')
-    const amountMicros = parseMoneyToMicros(payload.amount)
-    if (amountMicros <= 0) throw createHttpError('支付金额必须大于 0', 400, 'INVALID_AMOUNT')
     const externalId = String(payload.order_id || '').trim().slice(0, 128)
     if (!externalId) throw createHttpError('支付订单号不能为空', 400, 'INVALID_ORDER_ID')
+    const productId = payload.product_id ? String(payload.product_id).trim().slice(0, 64) : ''
+    const userId = payload.user_id != null && payload.user_id !== '' ? Number(payload.user_id) : undefined
+    // Product purchases (membership / credit packs) derive the amount from the
+    // product definition; only legacy raw top-ups require an `amount` field.
+    let amountMicros = 0
+    if (!productId) {
+      amountMicros = parseMoneyToMicros(payload.amount)
+      if (amountMicros <= 0) throw createHttpError('支付金额必须大于 0', 400, 'INVALID_AMOUNT')
+    }
     const result = db.creditPayment({
       provider: String(payload.provider || 'custom').slice(0, 64),
       externalId,
       email: payload.email,
+      userId,
       amountMicros,
+      productId: productId || undefined,
       payloadHash: createHash('sha256').update(body).digest('hex'),
     })
     sendJson(res, 200, { success: true, data: result })
@@ -296,6 +339,7 @@ export function createPlatformApp(options = {}) {
             agent_min_role: config.agentMinRole,
             relay_configured: Boolean(config.relayBaseUrl),
             image_models: Object.values(config.imageModels).filter(Boolean),
+            products: db.listProducts({ activeOnly: true }).map(serializeProduct),
           },
         },
       })
@@ -314,6 +358,7 @@ export function createPlatformApp(options = {}) {
           ...serializeUser(session.user, gateway),
           payment_url: config.paymentUrl,
           image_unit_price: config.imageUnitPriceMicros / 1000000,
+          products: db.listProducts({ activeOnly: true }).map(serializeProduct),
           entries: db.listLedger(session.user.id, url.searchParams.get('limit')),
         },
       })
@@ -380,6 +425,13 @@ export function createPlatformApp(options = {}) {
       sendJson(res, 200, { success: true, data: {} }, clearAuthCookies(config.cookieSecure))
       return
     }
+    if (pathname === '/api/platform/redeem' && req.method === 'POST') {
+      const session = requireSession(req, true)
+      const body = await readJsonBody(req)
+      const result = db.redeemCode(session.user.id, body.code)
+      sendJson(res, 200, { success: true, data: { ...serializeUser(result.user, gateway), granted: result.granted } })
+      return
+    }
     if (pathname === '/api/platform/admin/users' && req.method === 'GET') {
       const session = requireSession(req)
       if (!isAdmin(session.user)) throw createHttpError('需要管理员权限', 403, 'ADMIN_REQUIRED')
@@ -402,6 +454,77 @@ export function createPlatformApp(options = {}) {
       const body = await readJsonBody(req)
       const user = db.adjustBalance(session.user.id, Number(adminCreditMatch[1]), parseMoneyToMicros(body.amount), body.note)
       sendJson(res, 200, { success: true, data: serializeUser(user, gateway) })
+      return
+    }
+    const adminMembershipMatch = pathname.match(/^\/api\/platform\/admin\/users\/(\d+)\/membership$/)
+    if (adminMembershipMatch && req.method === 'POST') {
+      const session = requireSession(req, true)
+      if (!isAdmin(session.user)) throw createHttpError('需要管理员权限', 403, 'ADMIN_REQUIRED')
+      const body = await readJsonBody(req)
+      const user = db.adminGrantMembership(session.user.id, Number(adminMembershipMatch[1]), Number(body.days), body.note)
+      sendJson(res, 200, { success: true, data: serializeUser(user, gateway) })
+      return
+    }
+    const adminGrantCreditsMatch = pathname.match(/^\/api\/platform\/admin\/users\/(\d+)\/credits$/)
+    if (adminGrantCreditsMatch && req.method === 'POST') {
+      const session = requireSession(req, true)
+      if (!isAdmin(session.user)) throw createHttpError('需要管理员权限', 403, 'ADMIN_REQUIRED')
+      const body = await readJsonBody(req)
+      const user = db.adminGrantCredits(session.user.id, Number(adminGrantCreditsMatch[1]), Number(body.credits), body.note)
+      sendJson(res, 200, { success: true, data: serializeUser(user, gateway) })
+      return
+    }
+    if (pathname === '/api/platform/admin/products' && req.method === 'GET') {
+      const session = requireSession(req)
+      if (!isAdmin(session.user)) throw createHttpError('需要管理员权限', 403, 'ADMIN_REQUIRED')
+      sendJson(res, 200, { success: true, data: db.listProducts().map(serializeProduct) })
+      return
+    }
+    if (pathname === '/api/platform/admin/products' && req.method === 'POST') {
+      const session = requireSession(req, true)
+      if (!isAdmin(session.user)) throw createHttpError('需要管理员权限', 403, 'ADMIN_REQUIRED')
+      const body = await readJsonBody(req)
+      const product = db.upsertProduct(session.user.id, {
+        id: body.id,
+        kind: body.kind,
+        name: body.name,
+        description: body.description,
+        priceMicros: body.price != null ? parseMoneyToMicros(body.price) : Number(body.price_micros),
+        durationDays: body.duration_days,
+        credits: body.credits,
+        sortOrder: body.sort_order,
+        active: body.active,
+      })
+      sendJson(res, 200, { success: true, data: serializeProduct(product) })
+      return
+    }
+    const adminProductMatch = pathname.match(/^\/api\/platform\/admin\/products\/([A-Za-z0-9][A-Za-z0-9_-]{1,63})$/)
+    if (adminProductMatch && req.method === 'DELETE') {
+      const session = requireSession(req, true)
+      if (!isAdmin(session.user)) throw createHttpError('需要管理员权限', 403, 'ADMIN_REQUIRED')
+      sendJson(res, 200, { success: true, data: db.deleteProduct(session.user.id, adminProductMatch[1]) })
+      return
+    }
+    if (pathname === '/api/platform/admin/redemption-codes' && req.method === 'GET') {
+      const session = requireSession(req)
+      if (!isAdmin(session.user)) throw createHttpError('需要管理员权限', 403, 'ADMIN_REQUIRED')
+      const unusedOnly = url.searchParams.get('unused') === '1'
+      sendJson(res, 200, { success: true, data: db.listRedemptionCodes({ limit: url.searchParams.get('limit'), unusedOnly }).map(serializeRedemptionCode) })
+      return
+    }
+    if (pathname === '/api/platform/admin/redemption-codes' && req.method === 'POST') {
+      const session = requireSession(req, true)
+      if (!isAdmin(session.user)) throw createHttpError('需要管理员权限', 403, 'ADMIN_REQUIRED')
+      const body = await readJsonBody(req)
+      const codes = db.createRedemptionCodes(session.user.id, {
+        credits: body.credits,
+        membershipDays: body.membership_days,
+        balanceMicros: body.balance != null && body.balance !== '' ? parseMoneyToMicros(body.balance) : 0,
+        count: body.count,
+        note: body.note,
+        expiresAt: body.expires_at,
+      })
+      sendJson(res, 200, { success: true, data: { codes } })
       return
     }
     throw createHttpError('Not Found', 404, 'NOT_FOUND')

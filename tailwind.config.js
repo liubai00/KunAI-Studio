@@ -24,10 +24,34 @@ export default {
           DEFAULT: 'hsl(var(--sidebar) / <alpha-value>)',
           foreground: 'hsl(var(--sidebar-foreground) / <alpha-value>)',
         },
+        // ===== GPT Image Playground design tokens =====
+        // Colors used with Tailwind opacity modifiers (/20, /50…) use rgb-triplet
+        // vars so `<alpha-value>` resolves; solid usage stays fully opaque.
+        surface: 'rgb(var(--surface-rgb) / <alpha-value>)',
+        surface2: 'rgb(var(--surface-2-rgb) / <alpha-value>)',
+        ink: {
+          DEFAULT: 'rgb(var(--text-rgb) / <alpha-value>)',
+          2: 'rgb(var(--text-2-rgb) / <alpha-value>)',
+          3: 'rgb(var(--text-3-rgb) / <alpha-value>)',
+        },
+        line: 'var(--line)',
+        line2: 'var(--line-2)',
+        accent: {
+          DEFAULT: 'rgb(var(--accent-rgb) / <alpha-value>)',
+          ink: 'var(--accent-ink)',
+          soft: 'var(--accent-soft)',
+          glow: 'var(--accent-glow)',
+        },
+        info: 'rgb(var(--info-rgb) / <alpha-value>)',
       },
       fontFamily: {
         sans: ['var(--font-ui-sans)'],
         mono: ['var(--font-mono)'],
+        display: ['var(--font-display)'],
+      },
+      boxShadow: {
+        card: 'var(--shadow-card)',
+        lift: 'var(--shadow-lift)',
       },
     },
   },

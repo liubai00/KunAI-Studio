@@ -222,32 +222,32 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
   return (
     <div 
       ref={modalRef}
-      className="absolute top-12 left-0 w-80 sm:w-96 max-w-[calc(100vw-2rem)] max-h-[70vh] bg-white dark:bg-[#1c1c1e] rounded-xl shadow-2xl overflow-hidden flex flex-col border border-gray-200 dark:border-white/10 z-50 text-gray-900 dark:text-gray-200 animate-dropdown-down"
+      className="absolute top-12 left-0 w-80 sm:w-96 max-w-[calc(100vw-2rem)] max-h-[70vh] bg-surface rounded-xl shadow-lift overflow-hidden flex flex-col border border-line2 z-50 text-ink animate-dropdown-down"
     >
-      <div className="flex items-center justify-between p-3 border-b border-gray-200 dark:border-white/10 shrink-0">
+      <div className="flex items-center justify-between p-3 border-b border-line shrink-0">
         <input 
           type="text" 
           placeholder="搜索聊天..." 
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="flex-1 bg-transparent border-none outline-none text-sm px-2 text-gray-900 dark:text-white placeholder-gray-400"
+          className="flex-1 bg-transparent border-none outline-none text-sm px-2 text-ink placeholder-ink-3"
         />
-        <HistoryActionButton tooltip="关闭" onClick={onClose} className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded-lg text-gray-500 dark:text-gray-400 transition-colors">
+        <HistoryActionButton tooltip="关闭" onClick={onClose} className="p-1 hover:bg-surface2 rounded-lg text-ink-2 hover:text-ink transition-colors">
           <CloseIcon className="w-4 h-4" />
         </HistoryActionButton>
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-1 overscroll-contain">
         {filteredConversations.length === 0 && (
-          <div className="px-3 py-8 text-center text-sm text-gray-500">没有找到匹配的聊天</div>
+          <div className="px-3 py-8 text-center text-sm text-ink-3">没有找到匹配的聊天</div>
         )}
 
         {Object.entries(groups).map(([label, items]) => (
           <div key={label}>
-            <div className="mt-4 mb-1 px-3 text-xs font-medium text-gray-500">{label}</div>
+            <div className="mt-4 mb-1 px-3 text-xs font-medium text-ink-3">{label}</div>
             {items.map(c => (
               <div 
                 key={c.id} 
-                className="group flex h-14 items-center justify-between gap-2 rounded-lg px-3 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                className={`group flex h-14 items-center justify-between gap-2 rounded-lg px-3 transition-colors cursor-pointer ${c.id === activeConversationId ? 'bg-accent-soft text-accent-ink' : 'hover:bg-surface2'}`}
                 onClick={() => handleSelect(c.id)}
               >
                 <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -257,7 +257,7 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
                   {editingId === c.id ? (
                     <input
                       type="text"
-                      className="h-7 flex-1 bg-white dark:bg-black/20 border border-blue-400/50 dark:border-white/20 rounded px-1.5 py-0 text-sm leading-7 outline-none text-gray-900 dark:text-white focus:border-blue-500 dark:focus:border-white/40 shadow-sm min-w-0"
+                      className="h-7 flex-1 bg-surface2 border border-line2 rounded px-1.5 py-0 text-sm leading-7 outline-none text-ink focus:border-accent shadow-sm min-w-0"
                       value={editingTitle}
                       onChange={(e) => setEditingTitle(e.target.value)}
                       onKeyDown={handleRenameKeyDown}
@@ -267,10 +267,10 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
                     />
                   ) : (
                     <div className="min-w-0 flex-1">
-                      <div className={`text-sm truncate ${c.id === activeConversationId ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-600 dark:text-gray-300'}`}>
+                      <div className={`text-sm truncate ${c.id === activeConversationId ? 'font-medium' : 'text-ink-2'}`}>
                         {c.title}
                       </div>
-                      <div className="hidden sm:block mt-0.5 text-[11px] leading-none text-gray-500">
+                      <div className="hidden sm:block mt-0.5 text-[11px] leading-none text-ink-3">
                         {formatDetailTime(c.updatedAt)}
                       </div>
                     </div>
@@ -282,7 +282,7 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
                       tooltip="确认"
                       onClick={(e) => e.stopPropagation()}
                       onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); confirmRename() }}
-                      className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-md text-green-500 dark:text-green-400 hover:text-green-600 dark:hover:text-green-300 transition-colors"
+                      className="p-1.5 hover:bg-surface2 rounded-md text-emerald-500 hover:text-emerald-600 transition-colors"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -293,7 +293,7 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
                       <HistoryActionButton
                         tooltip="重命名"
                         onClick={(e) => startRename(e, c.id, c.title)}
-                        className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-white disabled:text-gray-300 disabled:hover:text-gray-300 dark:disabled:text-gray-600 dark:disabled:hover:text-gray-600 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors"
+                        className="p-1.5 hover:bg-surface2 rounded-md text-ink-3 hover:text-ink disabled:opacity-40 disabled:hover:text-ink-3 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors"
                         disabled={Boolean(agentGeneratingTitleIds[c.id])}
                       >
                         <EditIcon className="w-3.5 h-3.5" />
@@ -301,7 +301,7 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
                       <HistoryActionButton
                         tooltip="删除"
                         onClick={(e) => handleDelete(e, c.id)}
-                        className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-md text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                        className="p-1.5 hover:bg-surface2 rounded-md text-ink-3 hover:text-red-500 transition-colors"
                       >
                         <TrashIcon className="w-3.5 h-3.5" />
                       </HistoryActionButton>

@@ -16,12 +16,30 @@ export interface PlatformUser {
   quota: number
   reserved_quota?: number
   used_quota: number
+  image_credits?: number
+  reserved_credits?: number
+  available_credits?: number
+  membership_expires_at?: number | null
+  membership_active?: boolean
   request_count: number
   image_studio_capabilities: {
     generation: boolean
     agent: boolean
     admin?: boolean
   }
+}
+
+export interface PlatformProduct {
+  id: string
+  kind: 'membership' | 'credits'
+  name: string
+  description?: string
+  price: number
+  price_micros: number
+  duration_days: number
+  credits: number
+  sort_order: number
+  active: boolean
 }
 
 export interface PlatformStatus {
@@ -43,6 +61,7 @@ export interface PlatformStatus {
     agent_min_role: number
     relay_configured?: boolean
     image_models?: string[]
+    products?: PlatformProduct[]
   }
 }
 
@@ -59,7 +78,45 @@ export interface PlatformLedgerEntry {
 export interface PlatformBilling extends PlatformUser {
   payment_url?: string
   image_unit_price: number
+  products?: PlatformProduct[]
   entries: PlatformLedgerEntry[]
+}
+
+export interface ProductInput {
+  id: string
+  kind: 'membership' | 'credits'
+  name: string
+  description?: string
+  price: string
+  duration_days?: number
+  credits?: number
+  sort_order?: number
+  active?: boolean
+}
+
+export interface RedemptionCode {
+  code: string
+  credits: number
+  membership_days: number
+  balance: number
+  note: string
+  expires_at: number | null
+  redeemed_by: number | null
+  redeemed_at: number | null
+  created_at: number
+}
+
+export interface RedemptionInput {
+  credits?: number
+  membership_days?: number
+  balance?: string
+  count: number
+  note?: string
+  expires_at?: number | null
+}
+
+export interface RedeemResult extends PlatformUser {
+  granted: { credits?: number; membershipDays?: number; membershipExpiresAt?: number; balanceMicros?: number }
 }
 
 export function hasPlatformCapability(user: PlatformUser | null, _status: PlatformStatus | null, capability: 'generation' | 'agent') {
@@ -93,6 +150,14 @@ interface PlatformState {
   listUsers: (search?: string) => Promise<PlatformUser[]>
   updateUserAccess: (id: number, changes: { role?: number; status?: number; group?: string }) => Promise<PlatformUser>
   adjustUserBalance: (id: number, amount: string, note?: string) => Promise<PlatformUser>
+  grantUserMembership: (id: number, days: number, note?: string) => Promise<PlatformUser>
+  grantUserCredits: (id: number, credits: number, note?: string) => Promise<PlatformUser>
+  listProducts: () => Promise<PlatformProduct[]>
+  saveProduct: (product: ProductInput) => Promise<PlatformProduct>
+  deleteProduct: (id: string) => Promise<{ deleted: boolean }>
+  redeemCode: (code: string) => Promise<RedeemResult>
+  listRedemptionCodes: (unusedOnly?: boolean) => Promise<RedemptionCode[]>
+  createRedemptionCodes: (input: RedemptionInput) => Promise<{ codes: string[] }>
   logout: () => Promise<void>
 }
 
@@ -239,6 +304,31 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
   adjustUserBalance: (id, amount, note) => request(`/api/platform/admin/users/${id}/balance`, {
     method: 'POST',
     body: JSON.stringify({ amount, note }),
+  }),
+  grantUserMembership: (id, days, note) => request(`/api/platform/admin/users/${id}/membership`, {
+    method: 'POST',
+    body: JSON.stringify({ days, note }),
+  }),
+  grantUserCredits: (id, credits, note) => request(`/api/platform/admin/users/${id}/credits`, {
+    method: 'POST',
+    body: JSON.stringify({ credits, note }),
+  }),
+  listProducts: () => request('/api/platform/admin/products'),
+  saveProduct: (product) => request('/api/platform/admin/products', {
+    method: 'POST',
+    body: JSON.stringify(product),
+  }),
+  deleteProduct: (id) => request(`/api/platform/admin/products/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  }),
+  redeemCode: (code) => request('/api/platform/redeem', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  }),
+  listRedemptionCodes: (unusedOnly) => request(`/api/platform/admin/redemption-codes${unusedOnly ? '?unused=1' : ''}`),
+  createRedemptionCodes: (input) => request('/api/platform/admin/redemption-codes', {
+    method: 'POST',
+    body: JSON.stringify(input),
   }),
   logout: async () => {
     try {

@@ -7,10 +7,19 @@ import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
 import HistoryModal from './HistoryModal'
 import { useFavoriteCollectionTitle } from './FavoriteCollections'
-import { EditIcon, HelpCircleIcon, HistoryIcon, InstallIcon, SettingsIcon } from './icons'
+import { EditIcon, HelpCircleIcon, HistoryIcon, InstallIcon, MoonIcon, SettingsIcon, SunIcon } from './icons'
 import PlatformAccount from './platform/PlatformAccount'
 import { hasPlatformCapability, usePlatformStore } from '../platformStore'
 import { isPlatformModeEnabled } from '../lib/platformMode'
+import { toggleTheme, useResolvedTheme } from '../lib/theme'
+
+function BrandMark({ className = 'h-[31px] w-[31px]', apClassName = 'h-[11px] w-[11px]' }: { className?: string; apClassName?: string }) {
+  return (
+    <span className={`gi-brandmark ${className}`}>
+      <span className={`gi-aperture ${apClassName}`} />
+    </span>
+  )
+}
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -47,6 +56,8 @@ export default function Header() {
   const platformUser = usePlatformStore((s) => s.user)
   const platformStatus = usePlatformStore((s) => s.status)
   const agentAllowed = !isPlatformModeEnabled() || hasPlatformCapability(platformUser, platformStatus, 'agent')
+  const resolvedTheme = useResolvedTheme()
+  const themeTooltip = useTooltip()
 
   useEffect(() => {
     if (appMode === 'agent') {
@@ -152,17 +163,17 @@ export default function Header() {
 
   return (
     <>
-      <header data-no-drag-select className={`safe-area-top fixed top-0 left-0 right-0 z-40 bg-white/88 dark:bg-[#151513]/90 backdrop-blur-xl border-b border-black/[0.06] dark:border-white/[0.08] transition-transform duration-300 ease-in-out ${appMode === 'agent' && !agentMobileHeaderVisible ? '-translate-y-full sm:translate-y-0' : 'translate-y-0'}`}>
-        <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between relative">
-          <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
-            <h1 className="inline-flex min-w-0 items-center relative mr-2">
+      <header data-no-drag-select className={`safe-area-top fixed top-0 left-0 right-0 z-40 bg-[var(--hdr-bg)] backdrop-blur-xl border-b border-line transition-transform duration-300 ease-in-out ${appMode === 'agent' && !agentMobileHeaderVisible ? '-translate-y-full sm:translate-y-0' : 'translate-y-0'}`}>
+        <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between relative gap-2">
+          <div className="flex-1 min-w-0 pr-2 flex items-center gap-3">
+            <h1 className="inline-flex min-w-0 items-center relative">
               {showFavoriteCollectionTitle ? (
                 <>
-                  <span className="min-w-0 truncate text-[17px] font-bold tracking-tight text-gray-800 dark:text-gray-100 sm:hidden" title={favoriteCollectionTitle}>{favoriteCollectionTitle}</span>
-                  <span className="hidden items-center gap-2.5 text-base font-semibold text-[#302d29] dark:text-gray-100 sm:inline-flex"><span className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-amber-500 text-xs font-bold text-white shadow-sm">I</span>Image Studio</span>
+                  <span className="min-w-0 truncate text-[17px] font-display font-bold tracking-tight text-ink sm:hidden" title={favoriteCollectionTitle}>{favoriteCollectionTitle}</span>
+                  <span className="hidden items-center gap-[11px] sm:inline-flex"><BrandMark /><b className="font-display text-[16.5px] font-semibold tracking-[-0.012em] text-ink whitespace-nowrap">GPT Image Playground</b></span>
                 </>
               ) : (
-                <span className="inline-flex items-center gap-2.5 text-[16px] font-semibold text-[#302d29] dark:text-gray-100"><span className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-amber-500 text-xs font-bold text-white shadow-sm">I</span><span className="hidden xs:inline sm:inline">Image Studio</span></span>
+                <span className="inline-flex items-center gap-[11px]"><BrandMark /><b className="font-display text-[16.5px] font-semibold tracking-[-0.012em] text-ink whitespace-nowrap hidden xs:inline sm:inline">GPT Image Playground</b></span>
               )}
               {hasUpdate && latestRelease && (
                 <a
@@ -177,15 +188,15 @@ export default function Header() {
                 </a>
               )}
             </h1>
-            {appMode === 'agent' && <div className="hidden sm:flex items-center gap-1 relative">
+            {appMode === 'agent' && <div className="hidden sm:flex items-center gap-0.5 relative pl-1.5 border-l border-line">
               <button
                 ref={historyButtonRef}
                 type="button"
                 onClick={() => setShowHistoryModal((visible) => !visible)}
-                className="p-1.5 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/[0.04] rounded-lg transition-colors"
+                className="grid h-[38px] w-[38px] place-items-center rounded-[10px] text-ink-2 hover:bg-surface2 hover:text-ink transition-colors"
                 title="历史任务"
               >
-                <HistoryIcon className="w-5 h-5" />
+                <HistoryIcon className="w-[19px] h-[19px]" />
               </button>
               <button
                 type="button"
@@ -193,10 +204,10 @@ export default function Header() {
                   setAppMode('agent')
                   createConversation()
                 }}
-                className="p-1.5 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/[0.04] rounded-lg transition-colors"
+                className="grid h-[38px] w-[38px] place-items-center rounded-[10px] text-ink-2 hover:bg-surface2 hover:text-ink transition-colors"
                 title="新对话"
               >
-                <EditIcon className="w-5 h-5" />
+                <EditIcon className="w-[19px] h-[19px]" />
               </button>
               {showHistoryModal && (
                 <HistoryModal onClose={() => setShowHistoryModal(false)} ignoreOutsideClickRef={historyButtonRef} />
@@ -214,7 +225,7 @@ export default function Header() {
                     useStore.getState().setAgentEditingConversationId(activeConversation.id)
                   }, 0)
                 }}
-                className="text-sm font-semibold text-gray-700 dark:text-gray-300 truncate hover:bg-gray-100 dark:hover:bg-white/[0.04] px-2 py-1 rounded transition-colors"
+                className="text-sm font-semibold text-ink-2 truncate hover:bg-surface2 hover:text-ink px-2 py-1 rounded-md transition-colors"
               >
                 {activeConversation.title || 'Agent'}
               </button>
@@ -222,16 +233,16 @@ export default function Header() {
           )}
           {showFavoriteCollectionTitle && (
             <div className="absolute left-1/2 top-1/2 hidden max-w-[30%] -translate-x-1/2 -translate-y-1/2 sm:flex">
-              <div className="truncate rounded px-2 py-1 text-sm font-semibold text-gray-700 dark:text-gray-300" title={favoriteCollectionTitle}>
+              <div className="truncate rounded px-2 py-1 text-sm font-semibold text-ink-2" title={favoriteCollectionTitle}>
                 {favoriteCollectionTitle}
               </div>
             </div>
           )}
-          <div className="hidden sm:flex items-center gap-1 rounded-lg border border-black/[0.06] dark:border-white/[0.08] bg-[#f4f3f1] dark:bg-white/[0.04] p-1 mr-3">
+          <div className="hidden sm:flex items-center gap-[3px] rounded-[12px] border border-line bg-surface2 p-[3px] mr-1">
             <button
               type="button"
               onClick={() => setAppMode('gallery')}
-              className={`px-4 py-1.5 rounded-md text-sm transition-colors ${appMode === 'gallery' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              className={`px-[18px] py-1.5 rounded-[9px] text-[13px] transition-colors ${appMode === 'gallery' ? 'bg-surface text-ink shadow-card font-semibold' : 'font-medium text-ink-2 hover:text-ink'}`}
             >
               画廊
             </button>
@@ -239,12 +250,30 @@ export default function Header() {
               type="button"
               onClick={() => setAppMode('agent')}
               disabled={!agentAllowed}
-              className={`px-4 py-1.5 rounded-md text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${appMode === 'agent' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              className={`px-[18px] py-1.5 rounded-[9px] text-[13px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${appMode === 'agent' ? 'bg-surface text-ink shadow-card font-semibold' : 'font-medium text-ink-2 hover:text-ink'}`}
             >
               Agent
             </button>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-0.5 shrink-0">
+            <div
+              className="relative"
+              {...themeTooltip.handlers}
+            >
+              <button
+                onClick={() => {
+                  dismissAllTooltips()
+                  toggleTheme()
+                }}
+                className="grid h-[38px] w-[38px] place-items-center rounded-[10px] text-ink-2 hover:bg-surface2 hover:text-ink transition-colors"
+                aria-label="切换主题"
+              >
+                {resolvedTheme === 'dark' ? <SunIcon className="w-[19px] h-[19px]" /> : <MoonIcon className="w-[19px] h-[19px]" />}
+              </button>
+              <ViewportTooltip visible={themeTooltip.visible} className="whitespace-nowrap">
+                {resolvedTheme === 'dark' ? '浅色模式' : '深色模式'}
+              </ViewportTooltip>
+            </div>
             {!isPwaInstalled && (
               <div
                 className="relative"
@@ -255,10 +284,10 @@ export default function Header() {
                     dismissAllTooltips()
                     handleInstallClick()
                   }}
-                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+                  className="grid h-[38px] w-[38px] place-items-center rounded-[10px] text-ink-2 hover:bg-surface2 hover:text-ink transition-colors"
                   aria-label="安装为应用"
                 >
-                  <InstallIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                  <InstallIcon className="w-[19px] h-[19px]" />
                 </button>
                 <ViewportTooltip visible={installTooltip.visible} className="whitespace-nowrap">
                   安装为应用
@@ -274,10 +303,10 @@ export default function Header() {
                   dismissAllTooltips()
                   setShowHelp(true)
                 }}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+                className="grid h-[38px] w-[38px] place-items-center rounded-[10px] text-ink-2 hover:bg-surface2 hover:text-ink transition-colors"
                 aria-label="操作指南"
               >
-                <HelpCircleIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                <HelpCircleIcon className="w-[19px] h-[19px]" />
               </button>
               <ViewportTooltip visible={helpTooltip.visible} className="whitespace-nowrap">
                 操作指南
@@ -289,10 +318,10 @@ export default function Header() {
             >
               <button
                 onClick={() => setShowSettings(true)}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+                className="grid h-[38px] w-[38px] place-items-center rounded-[10px] text-ink-2 hover:bg-surface2 hover:text-ink transition-colors"
                 aria-label="设置"
               >
-                <SettingsIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                <SettingsIcon className="w-[19px] h-[19px]" />
               </button>
               <ViewportTooltip visible={settingsTooltip.visible} className="whitespace-nowrap">
                 设置
@@ -302,11 +331,11 @@ export default function Header() {
           </div>
         </div>
         <div className={`safe-area-x sm:hidden overflow-hidden transition-all duration-300 ease-in-out ${appMode === 'gallery' && scrollDirection === 'down' ? 'max-h-0 opacity-0 pb-0' : 'max-h-20 opacity-100 pb-2'}`}>
-          <div className="grid grid-cols-2 gap-1 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-gray-100/70 dark:bg-white/[0.04] p-1 mx-2">
+          <div className="grid grid-cols-2 gap-[3px] rounded-[12px] border border-line bg-surface2 p-[3px] mx-2">
             <button
               type="button"
               onClick={() => setAppMode('gallery')}
-              className={`px-4 py-1.5 rounded-lg text-sm transition-colors ${appMode === 'gallery' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              className={`px-4 py-1.5 rounded-[9px] text-[13px] transition-colors ${appMode === 'gallery' ? 'bg-surface text-ink shadow-card font-semibold' : 'font-medium text-ink-2 hover:text-ink'}`}
             >
               画廊
             </button>
@@ -314,7 +343,7 @@ export default function Header() {
               type="button"
               onClick={() => setAppMode('agent')}
               disabled={!agentAllowed}
-              className={`px-4 py-1.5 rounded-lg text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${appMode === 'agent' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              className={`px-4 py-1.5 rounded-[9px] text-[13px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${appMode === 'agent' ? 'bg-surface text-ink shadow-card font-semibold' : 'font-medium text-ink-2 hover:text-ink'}`}
             >
               Agent
             </button>

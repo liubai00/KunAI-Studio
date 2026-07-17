@@ -73,20 +73,20 @@ export default function InputBatchBars({
   if (showFavoriteCollectionBatchBar) {
     return (
       <div className="flex justify-center mb-3">
-        <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-lg rounded-full flex items-center p-1 border border-gray-200/50 dark:border-white/10 pointer-events-auto">
+        <div className="bg-[var(--dock-bg)] backdrop-blur-2xl border border-line2 shadow-lift rounded-[18px] flex items-center gap-[5px] p-2 pointer-events-auto">
           <BatchActionButton
             onClick={clearFavoriteCollectionSelection}
-            className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+            className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] text-ink-2 transition-colors hover:bg-surface2 hover:text-ink"
             tooltip="取消选择"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </BatchActionButton>
-          <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+          <div className="w-px h-6 bg-line mx-1"></div>
           <BatchActionButton
             onClick={onSelectAllVisibleFavoriteCollections}
-            className="p-2 text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+            className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] text-accent-ink transition-colors hover:bg-accent-soft"
             tooltip="全选收藏夹"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
@@ -96,7 +96,7 @@ export default function InputBatchBars({
           </BatchActionButton>
           <BatchActionButton
             onClick={onInvertVisibleFavoriteCollections}
-            className="p-2 text-purple-500 dark:text-purple-400 hover:text-purple-600 dark:hover:text-purple-300 transition-colors"
+            className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] text-ink-2 transition-colors hover:bg-surface2 hover:text-ink"
             tooltip="反选收藏夹"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
@@ -104,20 +104,20 @@ export default function InputBatchBars({
               <path d="M8 12h8M13 9l3 3-3 3" />
             </svg>
           </BatchActionButton>
-          <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+          <div className="w-px h-6 bg-line mx-1"></div>
           <BatchActionButton
             onClick={onDownloadSelectedFavoriteCollections}
-            className="p-2 text-green-500 dark:text-green-400 hover:text-green-600 dark:hover:text-green-300 transition-colors"
+            className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] text-ink-2 transition-colors hover:bg-surface2 hover:text-ink"
             tooltip="下载选中"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
           </BatchActionButton>
-          <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+          <div className="w-px h-6 bg-line mx-1"></div>
           <BatchActionButton
             onClick={onDeleteSelectedFavoriteCollections}
-            className="p-2 text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors"
+            className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] text-red-500 transition-colors hover:bg-red-500/10 hover:text-red-500"
             tooltip="删除选中"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -133,20 +133,20 @@ export default function InputBatchBars({
 
   return (
     <div className="flex justify-center mb-3">
-      <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-lg rounded-full flex items-center p-1 border border-gray-200/50 dark:border-white/10 pointer-events-auto">
+      <div className="bg-[var(--dock-bg)] backdrop-blur-2xl border border-line2 shadow-lift rounded-[18px] flex items-center gap-[5px] p-2 pointer-events-auto">
         <BatchActionButton
           onClick={clearSelection}
-          className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+          className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] text-ink-2 transition-colors hover:bg-surface2 hover:text-ink"
           tooltip="取消选择"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </BatchActionButton>
-        <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+        <div className="w-px h-6 bg-line mx-1"></div>
         <BatchActionButton
           onClick={onSelectAllVisibleTasks}
-          className="p-2 text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+          className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] text-accent-ink transition-colors hover:bg-accent-soft"
           tooltip="全选任务"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
@@ -156,7 +156,7 @@ export default function InputBatchBars({
         </BatchActionButton>
         <BatchActionButton
           onClick={onInvertVisibleTasks}
-          className="p-2 text-purple-500 dark:text-purple-400 hover:text-purple-600 dark:hover:text-purple-300 transition-colors"
+          className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] text-ink-2 transition-colors hover:bg-surface2 hover:text-ink"
           tooltip="反选任务"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
@@ -164,10 +164,10 @@ export default function InputBatchBars({
             <path d="M8 12h8M13 9l3 3-3 3" />
           </svg>
         </BatchActionButton>
-        <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+        <div className="w-px h-6 bg-line mx-1"></div>
         <BatchActionButton
           onClick={onToggleFavorite}
-          className="p-2 text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors"
+          className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] text-accent-ink transition-colors hover:bg-accent-soft"
           tooltip="编辑收藏夹"
         >
           {selectedTaskIds.length > 0 && selectedTaskIds.every((id) => tasks.find((t) => t.id === id)?.isFavorite) ? (
@@ -180,20 +180,20 @@ export default function InputBatchBars({
             </svg>
           )}
         </BatchActionButton>
-        <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+        <div className="w-px h-6 bg-line mx-1"></div>
         <BatchActionButton
           onClick={onDownloadSelected}
-          className="p-2 text-green-500 dark:text-green-400 hover:text-green-600 dark:hover:text-green-300 transition-colors"
+          className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] text-ink-2 transition-colors hover:bg-surface2 hover:text-ink"
           tooltip="下载选中"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
           </svg>
         </BatchActionButton>
-        <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+        <div className="w-px h-6 bg-line mx-1"></div>
         <BatchActionButton
           onClick={onDeleteSelected}
-          className="p-2 text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors"
+          className="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] text-red-500 transition-colors hover:bg-red-500/10 hover:text-red-500"
           tooltip="删除选中"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

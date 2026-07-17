@@ -129,15 +129,15 @@ export default function SearchBar() {
   }
 
   return (
-    <div ref={rootRef} data-no-drag-select className="mt-6 mb-4 flex gap-3">
-      <div className="flex gap-2 flex-shrink-0 z-20">
+    <div ref={rootRef} data-no-drag-select className="mt-6 mb-5 flex gap-2.5">
+      <div className="flex gap-2.5 flex-shrink-0 z-20">
         <SearchActionButton
           tooltip={favoriteTooltip}
           onClick={handleFavoriteClick}
-          className={`p-2.5 rounded-xl border transition-all ${
+          className={`grid h-[42px] w-[42px] place-items-center rounded-[12px] border shadow-card transition-all ${
             filterFavorite
-              ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-500/10 text-yellow-500'
-              : 'border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 text-gray-400 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+              ? 'border-transparent bg-accent-soft text-accent-ink'
+              : 'border-line bg-surface text-ink-2 hover:border-line2 hover:text-ink'
           }`}
         >
           {activeFavoriteCollectionId ? <ChevronLeftIcon className="w-5 h-5" /> : <FavoriteIcon filled={filterFavorite} className="w-5 h-5" />}
@@ -146,14 +146,14 @@ export default function SearchBar() {
           <SearchActionButton
             tooltip="管理收藏夹"
             onClick={openManageCollectionsModal}
-            className="p-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 text-gray-400 hover:bg-gray-50 dark:hover:bg-white/[0.06] transition-all"
+            className="grid h-[42px] w-[42px] place-items-center rounded-[12px] border border-line bg-surface text-ink-2 shadow-card hover:border-line2 hover:text-ink transition-all"
           >
             <CollectionManageIcon className="w-5 h-5" />
           </SearchActionButton>
         )}
         {!inCollectionOverview && (
           <>
-            <div className="relative w-[88px]">
+            <div className="relative w-[92px]">
               <Select
                 value={filterStatus}
                 onChange={handleStatusChange}
@@ -163,7 +163,7 @@ export default function SearchBar() {
                   { label: '生成中', value: 'running' },
                   { label: '失败', value: 'error' },
                 ]}
-                className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
+                className="h-[42px] px-3.5 rounded-[12px] border border-line bg-surface text-ink-2 shadow-card hover:border-line2 hover:text-ink text-[13px] font-medium focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft transition"
               />
             </div>
             {isFailedFilter && (
@@ -173,7 +173,7 @@ export default function SearchBar() {
                 disabled={failedCount === 0}
                 title={failedCount > 0 ? `清除 ${failedCount} 条失败记录` : '没有失败记录'}
                 aria-label={failedCount > 0 ? `清除 ${failedCount} 条失败记录` : '没有失败记录'}
-                className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 transition-all hover:bg-gray-50 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-white disabled:hover:text-gray-400 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-500 dark:hover:bg-white/[0.06] dark:hover:text-gray-300 dark:disabled:hover:bg-gray-900 dark:disabled:hover:text-gray-500"
+                className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] border border-line bg-surface text-ink-2 shadow-card transition-all hover:border-line2 hover:text-ink focus:outline-none focus:ring-2 focus:ring-accent-soft disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-line disabled:hover:text-ink-2"
               >
                 <TrashIcon className="h-[18px] w-[18px]" />
               </button>
@@ -183,7 +183,7 @@ export default function SearchBar() {
       </div>
       <div className="relative z-10 flex-1">
         <svg
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500"
+          className="absolute left-3.5 top-1/2 -translate-y-1/2 w-[17px] h-[17px] text-ink-3"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -201,7 +201,7 @@ export default function SearchBar() {
           onChange={(e) => setSearchQuery(e.target.value)}
           type="text"
           placeholder={inCollectionOverview ? '搜索收藏夹名称...' : '搜索提示词、参数...'}
-          className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
+          className="w-full h-[42px] pl-10 pr-3.5 rounded-[12px] border border-line bg-surface text-[13.5px] text-ink placeholder:text-ink-3 shadow-card focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft transition"
         />
       </div>
     </div>

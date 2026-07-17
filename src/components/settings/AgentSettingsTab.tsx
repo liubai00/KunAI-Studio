@@ -14,6 +14,7 @@ interface SelectOption {
 
 interface AgentSettingsTabProps {
   draft: AppSettings
+  platformMode?: boolean
   agentMaxToolRoundsInput: string
   agentTextProfileOptions: SelectOption[]
   agentImageProfileOptions: SelectOption[]
@@ -25,8 +26,15 @@ interface AgentSettingsTabProps {
   commitAgentMaxToolRounds: () => void
 }
 
+const AGENT_API_CONFIG_MODES: { label: string; value: AgentApiConfigMode }[] = [
+  { label: '关闭', value: 'off' },
+  { label: '原生', value: 'native' },
+  { label: '混合', value: 'hybrid' },
+]
+
 export default function AgentSettingsTab({
   draft,
+  platformMode = false,
   agentMaxToolRoundsInput,
   agentTextProfileOptions,
   agentImageProfileOptions,
@@ -38,76 +46,84 @@ export default function AgentSettingsTab({
   commitAgentMaxToolRounds,
 }: AgentSettingsTabProps) {
   return (
-    <div className="space-y-4">
-      <div className="block">
-        <div className="mb-1 flex items-center justify-between gap-3">
-          <span className="block text-sm text-gray-600 dark:text-gray-300">使用独立的 API 配置</span>
-          <div className="w-20 shrink-0">
-            <Select
-              value={draft.agentApiConfigMode}
-              onChange={(value) => updateAgentApiConfigMode(value as AgentApiConfigMode)}
-              options={[
-                { label: '关闭', value: 'off' },
-                { label: '原生', value: 'native' },
-                { label: '混合', value: 'hybrid' },
-              ]}
-              className="w-full px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm text-gray-700 dark:text-gray-200 outline-none"
-            />
-          </div>
-        </div>
-        <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500 space-y-1">
-          <div>原生：使用原生的 Responses API 配置，由模型调用 <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] dark:bg-white/[0.06]">image_generation</code> 工具生成图片。</div>
-          <div>混合：使用非原生的混合 API 配置，由文本模型调用自定义工具，请求图像模型生成图像，解决部分服务商/模型不支持 <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] dark:bg-white/[0.06]">image_generation</code> 工具的问题。</div>
-        </div>
-      </div>
-
-      {draft.agentApiConfigMode !== 'off' && (
+    <div>
+      {/* 托管平台由服务端统一提供 Agent API，用户端不暴露独立 API 配置 */}
+      {!platformMode && (
         <>
-          <div className="block">
-            <div className="mb-1 flex items-center justify-between gap-3">
-              <span className="block text-sm text-gray-600 dark:text-gray-300">文本模型 API 配置</span>
-              <div className="w-40 shrink-0">
-                {agentTextProfileOptions.length > 0 ? (
-                  <Select
-                    value={selectedAgentTextProfile?.id ?? ''}
-                    onChange={(value) => commitSettings({ ...draft, agentTextProfileId: String(value) })}
-                    options={agentTextProfileOptions}
-                    className="w-full px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm text-gray-700 dark:text-gray-200 outline-none"
-                  />
-                ) : (
-                  <div className="w-full rounded-xl border border-gray-200/60 bg-white/50 px-3 py-1.5 text-center text-xs text-gray-700 shadow-sm transition-all duration-200 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200">
-                    没有可用配置
-                  </div>
-                )}
-              </div>
+          <div className="border-b border-line py-[15px] first:pt-0.5 last:border-b-0">
+            <div className="mb-[7px]">
+              <span className="text-[13.5px] font-medium text-ink">使用独立的 API 配置</span>
             </div>
-            <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-              用于对话和调用工具，仅支持 Responses API 配置。
+            <div className="inline-flex gap-[3px] rounded-[11px] border border-line bg-surface2 p-[3px]">
+              {AGENT_API_CONFIG_MODES.map((mode) => {
+                const active = draft.agentApiConfigMode === mode.value
+                return (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    onClick={() => updateAgentApiConfigMode(mode.value)}
+                    className={`rounded-[8px] px-4 py-1.5 text-[12.5px] transition ${active ? 'bg-surface font-semibold text-ink shadow-card' : 'text-ink-2 hover:text-ink'}`}
+                  >
+                    {mode.label}
+                  </button>
+                )
+              })}
+            </div>
+            <div data-selectable-text className="mt-[9px] space-y-1 text-[12px] leading-[1.55] text-ink-3">
+              <div>原生：使用原生的 Responses API 配置，由模型调用 <code className="rounded-[5px] bg-surface2 px-[5px] py-px font-mono text-[0.92em] text-ink-2">image_generation</code> 工具生成图片。</div>
+              <div>混合：使用非原生的混合 API 配置，由文本模型调用自定义工具，请求图像模型生成图像，解决部分服务商/模型不支持 <code className="rounded-[5px] bg-surface2 px-[5px] py-px font-mono text-[0.92em] text-ink-2">image_generation</code> 工具的问题。</div>
             </div>
           </div>
 
-          {draft.agentApiConfigMode === 'hybrid' && (
-            <div className="block">
-              <div className="mb-1 flex items-center justify-between gap-3">
-                <span className="block text-sm text-gray-600 dark:text-gray-300">图像模型 API 配置</span>
-                <div className="w-40 shrink-0">
-                  <Select
-                    value={selectedAgentImageProfile?.id ?? ''}
-                    onChange={(value) => commitSettings({ ...draft, agentImageProfileId: String(value) })}
-                    options={agentImageProfileOptions}
-                    className="w-full px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm text-gray-700 dark:text-gray-200 outline-none"
-                  />
+          {draft.agentApiConfigMode !== 'off' && (
+            <>
+              <div className="border-b border-line py-[15px] first:pt-0.5 last:border-b-0">
+                <div className="mb-[7px] flex items-center justify-between gap-3.5">
+                  <span className="text-[13.5px] font-medium text-ink">文本模型 API 配置</span>
+                  <div className="w-40 shrink-0">
+                    {agentTextProfileOptions.length > 0 ? (
+                      <Select
+                        value={selectedAgentTextProfile?.id ?? ''}
+                        onChange={(value) => commitSettings({ ...draft, agentTextProfileId: String(value) })}
+                        options={agentTextProfileOptions}
+                        className="h-10 rounded-[11px] border border-line bg-surface2 px-3 text-[13px] font-medium text-ink transition-colors hover:border-line2"
+                      />
+                    ) : (
+                      <div className="flex h-10 w-full items-center justify-center rounded-[11px] border border-line bg-surface2 px-3 text-center text-[13px] text-ink-3">
+                        没有可用配置
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div data-selectable-text className="text-[12px] leading-[1.55] text-ink-3">
+                  用于对话和调用工具，仅支持 Responses API 配置。
                 </div>
               </div>
-              <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                用于生成图像，支持所有类型的 API 配置。
-              </div>
-            </div>
+
+              {draft.agentApiConfigMode === 'hybrid' && (
+                <div className="border-b border-line py-[15px] first:pt-0.5 last:border-b-0">
+                  <div className="mb-[7px] flex items-center justify-between gap-3.5">
+                    <span className="text-[13.5px] font-medium text-ink">图像模型 API 配置</span>
+                    <div className="w-40 shrink-0">
+                      <Select
+                        value={selectedAgentImageProfile?.id ?? ''}
+                        onChange={(value) => commitSettings({ ...draft, agentImageProfileId: String(value) })}
+                        options={agentImageProfileOptions}
+                        className="h-10 rounded-[11px] border border-line bg-surface2 px-3 text-[13px] font-medium text-ink transition-colors hover:border-line2"
+                      />
+                    </div>
+                  </div>
+                  <div data-selectable-text className="text-[12px] leading-[1.55] text-ink-3">
+                    用于生成图像，支持所有类型的 API 配置。
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </>
       )}
-      <label className="block">
-        <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">最大工具调用轮数</span>
+      <label className="block border-b border-line py-[15px] first:pt-0.5 last:border-b-0">
+        <span className="mb-[7px] block text-[13.5px] font-medium text-ink">最大工具调用轮数</span>
         <input
           value={agentMaxToolRoundsInput}
           onChange={(e) => setAgentMaxToolRoundsInput(e.target.value)}
@@ -115,15 +131,15 @@ export default function AgentSettingsTab({
           type="number"
           min={1}
           max={50}
-          className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+          className="h-10 w-full rounded-[11px] border border-line bg-surface2 px-3 font-mono text-[12.5px] text-ink outline-none transition focus:border-accent focus:ring-[3px] focus:ring-accent-soft"
         />
-        <div data-selectable-text className="mt-1.5 text-xs leading-relaxed text-gray-500 dark:text-gray-500">
+        <div data-selectable-text className="mt-[7px] text-[12px] leading-[1.55] text-ink-3">
           默认 15。用于限制 Agent 连续调用工具时的最大轮数，防止无限循环。
         </div>
       </label>
-      <div className="block">
-        <div className="mb-1 flex items-center justify-between gap-3">
-          <span className="block text-sm text-gray-600 dark:text-gray-300">网络搜索</span>
+      <div className="border-b border-line py-[15px] first:pt-0.5 last:border-b-0">
+        <div className="mb-[7px] flex items-center justify-between gap-3.5">
+          <span className="text-[13.5px] font-medium text-ink">网络搜索</span>
           <button
             type="button"
             onClick={() => {
@@ -133,16 +149,16 @@ export default function AgentSettingsTab({
               setAgentMaxToolRoundsInput(String(agentMaxToolRounds))
               commitSettings({ ...draft, agentMaxToolRounds, agentWebSearch: !draft.agentWebSearch })
             }}
-            className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${draft.agentWebSearch ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            className={`relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full transition-colors ${draft.agentWebSearch ? 'bg-accent' : 'bg-line2'}`}
             role="switch"
             aria-checked={draft.agentWebSearch}
             aria-label="网络搜索"
           >
-            <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.agentWebSearch ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${draft.agentWebSearch ? 'translate-x-[19px]' : 'translate-x-[3px]'}`} />
           </button>
         </div>
-        <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-          启用 Responses API 的 <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] dark:bg-white/[0.06]">web_search</code> 工具。模型每次调用此工具会产生少量固定价格的额外计费。
+        <div data-selectable-text className="text-[12px] leading-[1.55] text-ink-3">
+          启用 Responses API 的 <code className="rounded-[5px] bg-surface2 px-[5px] py-px font-mono text-[0.92em] text-ink-2">web_search</code> 工具。模型每次调用此工具会产生少量固定价格的额外计费。
         </div>
       </div>
     </div>

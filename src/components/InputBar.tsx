@@ -1542,7 +1542,7 @@ export default function InputBar() {
     }
   }, [])
 
-  const selectClass = 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm'
+  const selectClass = 'h-9 px-[11px] rounded-[11px] border border-line bg-surface2 hover:border-line2 text-[12.5px] font-medium text-ink font-mono transition-all duration-200'
 
   const getTouchDropIndex = (touch: React.Touch) => {
     const target = document
@@ -1961,7 +1961,7 @@ export default function InputBar() {
           onDownloadSelected={handleDownloadSelected}
           onDeleteSelected={handleDeleteSelected}
         />
-        <div ref={cardRef} className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] rounded-2xl sm:rounded-3xl p-3 sm:p-4 ring-1 ring-black/5 dark:ring-white/10">
+        <div ref={cardRef} className="bg-[var(--dock-bg)] backdrop-blur-2xl border border-line2 shadow-lift rounded-[22px] p-3 sm:p-4">
           {/* 移动端拖动条 */}
           <div
             ref={handleRef}
@@ -1998,7 +1998,7 @@ export default function InputBar() {
           )}
 
           {/* 输入框 */}
-          <div className="relative grid">
+          <div className="relative grid border-b border-line px-1 pb-3 pt-0.5">
             {showAtImageMenu && (
               <div style={{ left: `${menuLeft}px` }} className="absolute bottom-full z-50 mb-2 w-64 overflow-hidden rounded-2xl border border-gray-200/70 bg-white/95 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
                 <div className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">选择图片引用</div>
@@ -2014,8 +2014,8 @@ export default function InputBar() {
                       onMouseEnter={() => setAtImageMenuIndex(optionIndex)}
                       className={`flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-xs transition-colors ${
                         optionIndex === atImageMenuIndex
-                          ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300'
-                          : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'
+                          ? 'bg-accent-soft text-accent-ink'
+                          : 'text-ink-2 hover:bg-surface2'
                         }`}
                     >
                       <AtImageOptionThumb option={option} />
@@ -2071,10 +2071,10 @@ export default function InputBar() {
                 syncMentionTagSelection(el)
               }}
               aria-label={promptPlaceholder}
-              className="col-start-1 row-start-1 min-h-[42px] w-full overflow-hidden ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 pl-4 pr-10 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow] duration-200 focus:ring-1 focus:ring-blue-300/40 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-blue-500/30"
+              className="col-start-1 row-start-1 min-h-[36px] w-full overflow-hidden ios-rounded-scroll-fix whitespace-pre-wrap break-words px-2 pr-9 py-1.5 text-[14.5px] leading-relaxed text-ink outline-none"
             />
             {prompt.length === 0 && (
-              <div className={`prompt-placeholder col-start-1 row-start-1 pointer-events-none pl-4 pr-10 py-3 text-sm leading-relaxed text-gray-400 dark:text-gray-500${
+              <div className={`prompt-placeholder col-start-1 row-start-1 pointer-events-none px-2 pr-9 py-1.5 text-[14.5px] leading-relaxed text-ink-3${
                 isMobile && mobileCollapsed ? ' truncate' : ''
               }`}>
                 {promptPlaceholder}
@@ -2084,8 +2084,8 @@ export default function InputBar() {
               <button
                 type="button"
                 onClick={handleClearPrompt}
-                className={`absolute right-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/[0.08] rounded-full p-1 transition-all duration-200 focus:outline-none z-10 flex items-center justify-center ${
-                  isSingleLine ? 'top-1/2 -translate-y-1/2' : 'top-3'
+                className={`absolute right-1 grid h-[26px] w-[26px] place-items-center rounded-[7px] bg-surface2 text-ink-3 hover:text-ink transition-colors focus:outline-none z-10 ${
+                  isSingleLine ? 'top-1/2 -translate-y-1/2' : 'top-1'
                 }`}
                 title="清空文本"
               >
@@ -2097,10 +2097,10 @@ export default function InputBar() {
           {/* 参数 + 按钮 */}
           <div className="mt-3">
             {/* 桌面端布局 */}
-            <div className="hidden sm:flex items-end justify-between gap-3">
+            <div className="hidden sm:flex items-end justify-between gap-4">
               {renderParams('grid-cols-6')}
 
-              <div className="flex gap-2 flex-shrink-0 mb-0.5">
+              <div className="flex gap-2.5 flex-shrink-0 mb-0.5">
                 <div
                   className="relative"
                   onMouseEnter={() => setAttachHover(true)}
@@ -2109,14 +2109,14 @@ export default function InputBar() {
                   <ButtonTooltip visible={attachHover} text={uploadImageTooltipText} />
                   <button
                     onClick={() => !atImageLimit && fileInputRef.current?.click()}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm ${
+                    className={`grid h-11 w-11 place-items-center rounded-[13px] border transition-all ${
                       atImageLimit
-                        ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
-                        : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow'
+                        ? 'border-line bg-surface2 text-ink-3/50 cursor-not-allowed'
+                        : 'border-line bg-surface2 text-ink-2 hover:border-line2 hover:text-ink'
                     }`}
                     aria-label={uploadImageTooltipText}
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-[19px] h-[19px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                     </svg>
                   </button>
@@ -2130,12 +2130,12 @@ export default function InputBar() {
                   <button
                     onClick={() => activeAgentIsRunning ? stopActiveAgentResponse() : hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
                     disabled={activeAgentIsRunning ? false : hasSubmitApiConfig ? !canSubmit : false}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
+                    className={`grid h-11 w-11 place-items-center rounded-[13px] text-white transition-all ${
                       activeAgentIsRunning
-                        ? 'bg-red-500 text-white hover:bg-red-600'
+                        ? 'bg-red-500 hover:bg-red-600'
                         : !hasSubmitApiConfig
-                        ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
+                        ? 'bg-ink-3 cursor-pointer'
+                        : 'bg-[linear-gradient(150deg,var(--accent),#e07a1f)] shadow-[0_8px_20px_-6px_var(--accent-glow)] hover:-translate-y-px disabled:opacity-50 disabled:translate-y-0 disabled:cursor-not-allowed'
                     }`}
                     aria-label={submitButtonAriaLabel}
                   >
@@ -2174,10 +2174,10 @@ export default function InputBar() {
                         setShowMobileUploadMenu(!showMobileUploadMenu)
                       }
                     }}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm flex-shrink-0 ${
+                    className={`grid h-11 w-11 place-items-center rounded-[13px] border transition-all flex-shrink-0 ${
                       atImageLimit
-                        ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
-                        : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300'
+                        ? 'border-line bg-surface2 text-ink-3/50 cursor-not-allowed'
+                        : 'border-line bg-surface2 text-ink-2 hover:border-line2 hover:text-ink'
                     }`}
                     aria-label={uploadImageTooltipText}
                   >
@@ -2238,12 +2238,12 @@ export default function InputBar() {
                     onClick={() => activeAgentIsRunning ? stopActiveAgentResponse() : hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
                     disabled={activeAgentIsRunning ? false : hasSubmitApiConfig ? !canSubmit : false}
                     aria-label={submitButtonAriaLabel}
-                    className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all shadow-sm ${
+                    className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-[13px] text-sm font-medium text-white transition-all ${
                       activeAgentIsRunning
-                        ? 'bg-red-500 text-white hover:bg-red-600'
+                        ? 'bg-red-500 hover:bg-red-600'
                         : !hasSubmitApiConfig
-                        ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
+                        ? 'bg-ink-3 cursor-pointer'
+                        : 'bg-[linear-gradient(150deg,var(--accent),#e07a1f)] shadow-[0_8px_20px_-6px_var(--accent-glow)] disabled:opacity-50 disabled:cursor-not-allowed'
                     }`}
                   >
                     {activeAgentIsRunning ? (

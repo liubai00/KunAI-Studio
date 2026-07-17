@@ -1,4 +1,5 @@
-import { defineConfig, loadEnv } from 'vite'
+import { loadEnv } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { readFileSync } from 'fs'
 import { normalizeDevProxyConfig } from './src/lib/devProxy'
@@ -26,6 +27,13 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [react()],
     base: './',
+    // Keep the test suite hermetic: a local .env.local (e.g. platform-mode dev
+    // config) must not flip VITE_PLATFORM_MODE on during unit tests.
+    test: {
+      env: {
+        VITE_PLATFORM_MODE: 'false',
+      },
+    },
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),
       __DEV_PROXY_CONFIG__: JSON.stringify(devProxyConfig),

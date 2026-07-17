@@ -100,9 +100,21 @@ Session Cookie 是 256-bit 随机 opaque token，数据库只保存 SHA-256。�
 
 SQLite 部署应保持单实例；多实例部署需要把账户、任务和账本迁移到 PostgreSQL 等共享数据库，同时把结果文件迁移到所有实例可访问且支持原子写入的共享存储。
 
-## 支付模块预留
+## 计费：会员 / 次数 / 余额
 
-`PAYMENT_URL` 控制账单弹窗中的充值入口。第三方支付完成后调用：
+平台支持三种计费方式，生成图片时按以下优先级消费：
+
+1. **会员（membership）**：有效期内不限次生成，完全免费；到期后停用。
+2. **次数包（credits）**：独立的「次数」钱包，每张成功图片扣 1 次。
+3. **USD 余额（balance）**：以上都没有时，按 `IMAGE_UNIT_PRICE` 从余额扣费（原按量模式）。
+
+会员套餐与次数包为**商品（products）**，由管理员在账户菜单的「商品与定价」后台增删改价，无需改环境变量。每个商品含：`id`、`kind`（`membership` 或 `credits`）、名称、价格（USD）、会员天数（`duration_days`）或赠送次数（`credits`）、上下架开关。用户在「账户与账单」弹窗中看到已上架商品并购买。管理员也可在「用户与权限」中为单个用户手动开通会员 / 赠送次数 / 调整余额。
+
+金额仍以整数微美元存储；会员/次数的授予记入账本（`membership_payment`、`credits_payment`、`membership_grant`、`credit_grant`）。
+
+## 支付回调
+
+`PAYMENT_URL` 是账单页的支付入口。购买商品时前端跳转到 `PAYMENT_URL?product_id=<商品ID>&user_id=<用户ID>`。第三方支付完成后调用签名回调：
 
 ```http
 POST /api/platform/payment/webhook
@@ -110,10 +122,25 @@ X-Payment-Signature: <hex hmac-sha256 of raw body>
 Content-Type: application/json
 ```
 
+购买会员 / 次数包（推荐）——带 `product_id`，金额由商品定义决定：
+
 ```json
 {
   "provider": "internal",
   "order_id": "order-1001",
+  "product_id": "pro-monthly",
+  "user_id": 42,
+  "currency": "USD",
+  "status": "paid"
+}
+```
+
+`user_id` 可用 `email` 代替。不带 `product_id` 时按 `amount` 充值 USD 余额（兼容旧流程）：
+
+```json
+{
+  "provider": "internal",
+  "order_id": "order-1002",
   "email": "user@example.com",
   "amount": "10.00",
   "currency": "USD",
@@ -121,7 +148,7 @@ Content-Type: application/json
 }
 ```
 
-签名密钥为 `PAYMENT_WEBHOOK_SECRET`。`provider + order_id` 在数据库中唯一，支付平台重试同一事件不会重复充值。
+签名密钥为 `PAYMENT_WEBHOOK_SECRET`。`provider + order_id` 在数据库中唯一，支付平台重试同一事件不会重复开通或充值。
 
 ## 生产部署
 

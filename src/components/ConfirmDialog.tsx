@@ -9,7 +9,7 @@ function renderMessage(message: string) {
   return message.split(/(`[^`]+`|「[^」]+」|\*\*[^*]+\*\*)/g).map((part, index) => {
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
-        <code key={index} className="rounded bg-gray-100 px-1 py-0.5 text-[0.85em] text-gray-700 dark:bg-white/[0.06] dark:text-gray-200">
+        <code key={index} className="rounded bg-surface2 px-1 py-0.5 font-mono text-[0.85em] text-ink-2">
           {part.slice(1, -1)}
         </code>
       )
@@ -17,7 +17,7 @@ function renderMessage(message: string) {
 
     if (part.startsWith('「') && part.endsWith('」')) {
       return (
-        <strong key={index} className="font-semibold text-gray-700 dark:text-gray-200">
+        <strong key={index} className="font-semibold text-ink">
           {part}
         </strong>
       )
@@ -25,7 +25,7 @@ function renderMessage(message: string) {
 
     if (part.startsWith('**') && part.endsWith('**')) {
       return (
-        <strong key={index} className="font-semibold text-gray-700 dark:text-gray-200">
+        <strong key={index} className="font-semibold text-ink">
           {part.slice(2, -2)}
         </strong>
       )
@@ -37,11 +37,12 @@ function renderMessage(message: string) {
 
 function getActionButtonClass(tone: 'primary' | 'secondary' | 'danger' | 'warning' = 'primary') {
   if (tone === 'secondary') {
-    return 'border border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-400 dark:hover:bg-white/[0.06]'
+    return 'bg-surface2 text-ink border border-line hover:border-line2'
   }
-  if (tone === 'warning') return 'bg-orange-500 text-white hover:bg-orange-600'
-  if (tone === 'danger') return 'bg-red-500 text-white hover:bg-red-600'
-  return 'bg-blue-500 text-white hover:bg-blue-600'
+  if (tone === 'danger') {
+    return 'bg-red-500 text-white shadow-[0_8px_20px_-6px_rgba(229,72,77,0.45)] hover:bg-red-600 hover:-translate-y-px'
+  }
+  return 'bg-[linear-gradient(150deg,var(--accent),#e07a1f)] text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] hover:-translate-y-px'
 }
 
 export default function ConfirmDialog() {
@@ -93,25 +94,25 @@ export default function ConfirmDialog() {
       className="fixed inset-0 z-[110] flex items-center justify-center p-4"
       onClick={handleClose}
     >
-      <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
+      <div className="absolute inset-0 bg-[rgba(12,11,9,0.55)] backdrop-blur-sm animate-overlay-in" />
       <div
-        className="relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-sm w-full p-6 z-10 ring-1 ring-black/5 dark:ring-white/10 animate-confirm-in"
+        className="relative bg-surface border border-line2 rounded-2xl shadow-lift max-w-sm w-full p-6 z-10 animate-confirm-in"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-2 flex items-center gap-2 text-base font-bold text-gray-800 dark:text-gray-100">
+        <h3 className="mb-2 flex items-center gap-2 text-base font-display font-semibold text-ink">
           {confirmDialog.icon === 'info' && (
-            <svg className="h-5 w-5 shrink-0 text-blue-500" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+            <svg className="h-5 w-5 shrink-0 text-accent" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="10" />
               <path d="M12 16v-4" />
               <path d="M12 8h.01" />
             </svg>
           )}
           {confirmDialog.icon === 'copy' && (
-            <CopyIcon className="h-5 w-5 shrink-0 text-blue-500" />
+            <CopyIcon className="h-5 w-5 shrink-0 text-accent" />
           )}
           {confirmDialog.title}
         </h3>
-        <p className={`text-sm text-gray-500 dark:text-gray-400 ${confirmDialog.checkbox ? 'mb-4' : 'mb-6'} leading-relaxed whitespace-pre-line ${confirmDialog.messageAlign === 'center' ? 'text-center' : ''}`}>
+        <p className={`text-sm text-ink-2 ${confirmDialog.checkbox ? 'mb-4' : 'mb-6'} leading-relaxed whitespace-pre-line ${confirmDialog.messageAlign === 'center' ? 'text-center' : ''}`}>
           {renderMessage(confirmDialog.message)}
         </p>
         {confirmDialog.checkbox && (
@@ -135,7 +136,7 @@ export default function ConfirmDialog() {
                   setConfirmDialog(null)
                 }}
                 disabled={!canConfirm}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${getActionButtonClass(button.tone)}`}
+                className={`flex-1 py-2.5 rounded-xl text-[13px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 ${getActionButtonClass(button.tone)}`}
               >
                 {button.label}
               </button>
@@ -146,7 +147,7 @@ export default function ConfirmDialog() {
             {confirmDialog.showCancel !== false && (
               <button
                 onClick={handleCancel}
-                className="flex-1 py-2 rounded-lg border border-gray-200 dark:border-white/[0.08] text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/[0.06] transition"
+                className="flex-1 py-2.5 rounded-xl border border-line bg-surface2 text-[13px] font-semibold text-ink hover:border-line2 transition"
               >
                 {cancelText}
               </button>
@@ -158,7 +159,7 @@ export default function ConfirmDialog() {
                 setConfirmDialog(null)
               }}
               disabled={!canConfirm}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${confirmClassName}`}
+              className={`flex-1 py-2.5 rounded-xl text-[13px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 ${confirmClassName}`}
             >
               {confirmText}
             </button>

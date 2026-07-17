@@ -207,40 +207,40 @@ export default function ImageContextMenu() {
   return (
     <div
       ref={menuRef}
-      className="fixed z-[9999] bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-100 dark:border-gray-700 py-1 w-[120px] overflow-hidden animate-fade-in"
+      className="fixed z-[9999] bg-surface border border-line2 rounded-xl shadow-lift p-1.5 w-[120px] overflow-hidden animate-fade-in"
       style={{ left, top }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {menuInfo.canCopyImage && (
         <button
           onClick={handleCopy}
-          className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
+          className="w-full px-2 py-1.5 rounded-lg text-left text-[13px] text-ink hover:bg-surface2 flex items-center gap-2 transition-colors"
         >
-          <CopyIcon className="w-4 h-4 flex-shrink-0" />
+          <CopyIcon className="w-4 h-4 flex-shrink-0 text-ink-3" />
           复制
         </button>
       )}
       <button
         onClick={handleDownload}
-        className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
+        className="w-full px-2 py-1.5 rounded-lg text-left text-[13px] text-ink hover:bg-surface2 flex items-center gap-2 transition-colors"
       >
-        <DownloadIcon className="w-4 h-4 flex-shrink-0" />
+        <DownloadIcon className="w-4 h-4 flex-shrink-0 text-ink-3" />
         下载
       </button>
       {showDownloadAll && (
         <button
           onClick={handleDownloadAll}
-          className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
+          className="w-full px-2 py-1.5 rounded-lg text-left text-[13px] text-ink hover:bg-surface2 flex items-center gap-2 transition-colors"
         >
-          <DownloadIcon className="w-4 h-4 flex-shrink-0" />
+          <DownloadIcon className="w-4 h-4 flex-shrink-0 text-ink-3" />
           下载全部
         </button>
       )}
       <button
         onClick={handleEdit}
-        className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
+        className="w-full px-2 py-1.5 rounded-lg text-left text-[13px] text-ink hover:bg-surface2 flex items-center gap-2 transition-colors"
       >
-        <EditIcon className="w-4 h-4 flex-shrink-0" />
+        <EditIcon className="w-4 h-4 flex-shrink-0 text-ink-3" />
         编辑
       </button>
     </div>

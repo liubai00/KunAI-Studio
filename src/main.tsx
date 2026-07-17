@@ -7,21 +7,17 @@ import './index.css'
 import { installMobileViewportGuards } from './lib/viewport'
 import { isPlatformModeEnabled } from './lib/platformMode'
 import { setActiveStorageUser } from './lib/userStorage'
+import { initTheme } from './lib/theme'
 import { PLATFORM_SESSION_EVENT_KEY, hasPlatformCapability, usePlatformStore } from './platformStore'
 import AuthScreen from './components/auth/AuthScreen'
 
 const App = lazy(() => import('./App'))
 const platformModeEnabled = isPlatformModeEnabled()
-const preferredDarkMode = window.matchMedia('(prefers-color-scheme: dark)')
-
-const syncPreferredTheme = () => {
-  const dark = !platformModeEnabled && preferredDarkMode.matches
-  document.documentElement.classList.toggle('dark', dark)
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#09090b' : '#f7f7f5')
-}
 
 installMobileViewportGuards()
-syncPreferredTheme()
+// Follow the persisted theme preference; platform mode defaults to light when
+// the user has never chosen one. Manual toggle lives in the header.
+initTheme(platformModeEnabled ? 'light' : 'system')
 
 if ('serviceWorker' in navigator) {
   if (import.meta.env.PROD) {
@@ -57,11 +53,6 @@ function Root() {
   const logout = usePlatformStore((s) => s.logout)
   const refreshSession = usePlatformStore((s) => s.refreshSession)
   const bootstrapStarted = useRef(false)
-
-  useEffect(() => {
-    preferredDarkMode.addEventListener('change', syncPreferredTheme)
-    return () => preferredDarkMode.removeEventListener('change', syncPreferredTheme)
-  }, [])
 
   useEffect(() => {
     if (platformMode && !bootstrapStarted.current) {

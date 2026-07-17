@@ -93,9 +93,9 @@ export default function InputParamsPanel({
   onOpenSizePicker: () => void
 }) {
   return (
-    <div className={`grid ${cols} gap-2 text-xs flex-1`}>
+    <div className={`grid ${cols} gap-x-3.5 gap-y-2 flex-1`}>
       <label
-        className="relative flex flex-col gap-0.5"
+        className="relative flex flex-col gap-1.5"
         onMouseEnter={sizeHint.show}
         onMouseLeave={sizeHint.hide}
         onTouchStart={sizeHint.startTouch}
@@ -103,11 +103,11 @@ export default function InputParamsPanel({
         onTouchCancel={sizeHint.hide}
         onClick={sizeHint.show}
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">尺寸</span>
+        <span className="text-ink-3 ml-1 text-[11px] font-medium">尺寸</span>
         <button
           type="button"
           onClick={() => { dismissAllTooltips(); onOpenSizePicker() }}
-          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] focus:outline-none text-xs text-left transition-all duration-200 shadow-sm font-mono"
+          className="h-9 px-[11px] rounded-[11px] border border-line bg-surface2 hover:border-line2 focus:outline-none text-[12.5px] font-medium text-ink text-left transition-all duration-200 font-mono"
           title="选择尺寸"
         >
           {displaySize}
@@ -118,7 +118,7 @@ export default function InputParamsPanel({
         />
       </label>
       <label
-        className="relative flex flex-col gap-0.5"
+        className="relative flex flex-col gap-1.5"
         onMouseEnter={qualityHint.show}
         onMouseLeave={qualityHint.hide}
         onTouchStart={qualityHint.startTouch}
@@ -126,7 +126,7 @@ export default function InputParamsPanel({
         onTouchCancel={qualityHint.hide}
         onClick={qualityHint.show}
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">质量</span>
+        <span className="text-ink-3 ml-1 text-[11px] font-medium">质量</span>
         <Select
           value={activeProfile.codexCli ? 'auto' : isFalProvider && params.quality === 'auto' ? 'high' : params.quality}
           onChange={(val) => {
@@ -135,7 +135,7 @@ export default function InputParamsPanel({
           options={qualityOptions}
           disabled={activeProfile.codexCli}
           className={activeProfile.codexCli
-            ? 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-xs transition-all duration-200 shadow-sm'
+            ? 'h-9 px-[11px] rounded-[11px] border border-line bg-surface2 opacity-50 cursor-not-allowed text-[12.5px] font-medium font-mono transition-all duration-200'
             : selectClass}
         />
         <ButtonTooltip
@@ -143,8 +143,8 @@ export default function InputParamsPanel({
           text={isFalProvider ? <>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 质量参数</> : 'Codex CLI 不支持质量参数'}
         />
       </label>
-      <label className="flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">格式</span>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-ink-3 ml-1 text-[11px] font-medium">格式</span>
         <Select
           value={params.output_format}
           onChange={(val) => {
@@ -163,7 +163,7 @@ export default function InputParamsPanel({
       </label>
       {showTransparentOutputControl ? (
         <label
-          className="relative flex flex-col gap-0.5"
+          className="relative flex flex-col gap-1.5"
           onMouseEnter={transparentOutputHint.show}
           onMouseLeave={transparentOutputHint.hide}
           onTouchStart={transparentOutputHint.startTouch}
@@ -171,7 +171,7 @@ export default function InputParamsPanel({
           onTouchCancel={transparentOutputHint.hide}
           onClick={transparentOutputHint.show}
         >
-          <span className="text-gray-400 dark:text-gray-500 ml-1">透明背景</span>
+          <span className="text-ink-3 ml-1 text-[11px] font-medium">透明背景</span>
           <Select
             value={transparentOutputEnabled ? 'on' : 'off'}
             onChange={(val) => {
@@ -192,7 +192,7 @@ export default function InputParamsPanel({
         </label>
       ) : (
         <label
-          className="relative flex flex-col gap-0.5"
+          className="relative flex flex-col gap-1.5"
           onMouseEnter={compressionHint.show}
           onMouseLeave={compressionHint.hide}
           onTouchStart={compressionHint.startTouch}
@@ -200,7 +200,7 @@ export default function InputParamsPanel({
           onTouchCancel={compressionHint.hide}
           onClick={compressionHint.show}
         >
-          <span className="text-gray-400 dark:text-gray-500 ml-1">压缩率</span>
+          <span className="text-ink-3 ml-1 text-[11px] font-medium">压缩率</span>
           <input
             value={outputCompressionInput}
             onChange={(e) => setOutputCompressionInput(e.target.value)}
@@ -210,10 +210,10 @@ export default function InputParamsPanel({
             min={0}
             max={100}
             placeholder="0-100"
-            className={`px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none text-xs transition-all duration-200 shadow-sm ${
+            className={`h-9 px-[11px] rounded-[11px] border border-line focus:outline-none focus:border-accent text-[12.5px] font-medium font-mono text-ink transition-all duration-200 ${
               compressionDisabled
-                ? 'bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed'
-                : 'bg-white/50 dark:bg-white/[0.03]'
+                ? 'bg-surface2 opacity-50 cursor-not-allowed'
+                : 'bg-surface2'
               }`}
           />
           <ButtonTooltip
@@ -223,7 +223,7 @@ export default function InputParamsPanel({
         </label>
       )}
       <label
-        className="relative flex flex-col gap-0.5"
+        className="relative flex flex-col gap-1.5"
         onMouseEnter={moderationHint.show}
         onMouseLeave={moderationHint.hide}
         onTouchStart={moderationHint.startTouch}
@@ -231,7 +231,7 @@ export default function InputParamsPanel({
         onTouchCancel={moderationHint.hide}
         onClick={moderationHint.show}
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">审核</span>
+        <span className="text-ink-3 ml-1 text-[11px] font-medium">审核</span>
         <Select
           value={moderationDisabled ? 'auto' : params.moderation}
           onChange={(val) => {
@@ -243,7 +243,7 @@ export default function InputParamsPanel({
           ]}
           disabled={moderationDisabled}
           className={moderationDisabled
-            ? 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-xs transition-all duration-200 shadow-sm'
+            ? 'h-9 px-[11px] rounded-[11px] border border-line bg-surface2 opacity-50 cursor-not-allowed text-[12.5px] font-medium font-mono transition-all duration-200'
             : selectClass}
         />
         <ButtonTooltip
@@ -252,7 +252,7 @@ export default function InputParamsPanel({
         />
       </label>
       <label
-        className="relative flex flex-col gap-0.5"
+        className="relative flex flex-col gap-1.5"
         onMouseEnter={() => { showAgentNHint(); streamConcurrentHint.show() }}
         onMouseLeave={() => { hideNLimitHint(); streamConcurrentHint.hide() }}
         onTouchStart={() => { startAgentNHintTouch(); streamConcurrentHint.startTouch() }}
@@ -264,7 +264,7 @@ export default function InputParamsPanel({
         }}
         onClick={() => { showAgentNHint(); streamConcurrentHint.show() }}
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">数量</span>
+        <span className="text-ink-3 ml-1 text-[11px] font-medium">数量</span>
         <input
           value={nInput}
           onChange={(e) => handleNInputChange(e.target.value)}
@@ -287,10 +287,10 @@ export default function InputParamsPanel({
           type={agentAutoImageCount ? 'text' : 'number'}
           min={agentAutoImageCount ? undefined : 1}
           max={agentAutoImageCount ? undefined : outputImageLimit}
-          className={`px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none text-xs transition-all duration-200 shadow-sm ${
+          className={`h-9 px-[11px] rounded-[11px] border border-line focus:outline-none focus:border-accent text-[12.5px] font-medium font-mono text-ink transition-all duration-200 ${
             agentAutoImageCount
-              ? 'bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed'
-              : 'bg-white/50 dark:bg-white/[0.03]'
+              ? 'bg-surface2 opacity-50 cursor-not-allowed'
+              : 'bg-surface2'
           }`}
         />
         <ButtonTooltip visible={nLimitHint.visible} text={nLimitHintText} />

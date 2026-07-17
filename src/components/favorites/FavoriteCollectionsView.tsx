@@ -9,7 +9,7 @@ import {
 import { useDragSelect } from '../../hooks/useDragSelect'
 import { FavoriteIcon } from '../icons'
 import { FavoriteCollectionOverviewCard } from './FavoriteCollectionOverviewCard'
-import { getCollectionTasks, getLatestCoverTask, type CollectionCard } from './favoriteUtils'
+import { getCollectionTasks, type CollectionCard } from './favoriteUtils'
 
 export function FavoriteCollectionsView() {
   const tasks = useStore((s) => s.tasks)
@@ -122,14 +122,13 @@ export function FavoriteCollectionsView() {
   return (
     <div data-favorite-collections-root className="relative min-h-[50vh]">
       {filteredCards.length === 0 ? (
-        <div className="py-32 text-center text-gray-400 dark:text-gray-500">
-          <FavoriteIcon className="mx-auto mb-4 h-12 w-12 text-gray-300 dark:text-gray-600" />
+        <div className="py-32 text-center text-ink-3">
+          <FavoriteIcon className="mx-auto mb-4 h-12 w-12 text-ink-3" />
           <p className="text-sm">{cards.length === 0 ? '还没有收藏的图片' : '没有找到匹配的收藏夹'}</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 pb-10">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 pb-10">
           {filteredCards.map((card) => {
-            const coverTask = getLatestCoverTask(card.tasks)
             const isVirtualAll = card.id === ALL_FAVORITES_COLLECTION_ID
             const isDefault = card.id === defaultFavoriteCollectionId
             const canDelete = collections.length > 1
@@ -141,7 +140,6 @@ export function FavoriteCollectionsView() {
               >
                 <FavoriteCollectionOverviewCard
                   card={card}
-                  coverTask={coverTask}
                   isVirtualAll={isVirtualAll}
                   isDefault={isDefault}
                   canDelete={canDelete}
@@ -165,7 +163,7 @@ export function FavoriteCollectionsView() {
       )}
       {selectionBox && (
         <div
-          className="fixed bg-blue-500/20 border border-blue-500/50 pointer-events-none z-[30]"
+          className="fixed bg-accent/20 border border-accent/50 pointer-events-none z-[30]"
           style={{
             left: Math.min(selectionBox.startPageX, selectionBox.currentPageX) - window.scrollX,
             top: Math.min(selectionBox.startPageY, selectionBox.currentPageY) - window.scrollY,

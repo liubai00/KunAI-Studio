@@ -4,6 +4,7 @@ import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { suppressGlobalClicks } from '../lib/clickSuppression'
+import { downloadImageIds } from '../lib/downloadImages'
 
 const MIN_SCALE = 1
 const MAX_SCALE = 10
@@ -602,78 +603,104 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
   const zoomPercent = Math.round(s * 100)
 
   const navBtnClass =
-    'absolute top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 text-white hover:bg-black/60 transition-all z-10 backdrop-blur-sm'
+    'lb-nav absolute top-1/2 -translate-y-1/2 grid place-items-center w-[50px] h-[50px] rounded-full bg-white/10 text-white hover:bg-white/[.22] transition-colors z-10'
 
   return (
     <div
       ref={containerRef}
       data-lightbox-root
-      className="fixed inset-0 z-[60] flex items-center justify-center select-none"
+      className="fixed inset-0 z-[60] flex flex-col select-none"
       style={{ cursor: isZoomed ? (isDragging ? 'grabbing' : 'grab') : 'pointer' }}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-md animate-fade-in" />
-      <div className="relative animate-zoom-in">
-        <div
-          className="relative flex items-center justify-center"
-          style={{
-            transform: `translate(${tx}px, ${ty}px) scale(${s})`,
-            transition: isDragging ? 'none' : 'transform 0.2s ease-out',
-            willChange: 'transform',
-          }}
-        >
-          <img
-            src={src}
-            data-image-id={imageId}
-            className="saveable-image max-w-[85vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
-            onDragStart={(e) => e.preventDefault()}
-            alt=""
-          />
-          {maskPreviewSrc && (
-            <img
-              src={maskPreviewSrc}
-              className="absolute inset-0 w-full h-full object-contain rounded-lg pointer-events-none"
-              alt=""
-            />
-          )}
+      <div className="absolute inset-0 bg-[rgba(9,8,7,0.93)] backdrop-blur-[9px] animate-fade-in" />
+
+      {/* 顶部工具栏：左侧计数（等宽），右侧操作按钮 */}
+      <div className="relative z-10 flex-none flex h-[58px] items-center justify-between px-[18px]">
+        <span className="font-mono text-[13px] font-medium text-white/[.72]">
+          {showNav ? `${currentIndex + 1} / ${total}` : ''}
+        </span>
+        <div className="flex gap-1.5">
+          <button
+            className="grid place-items-center w-10 h-10 rounded-[11px] bg-white/[.09] text-white hover:bg-white/[.18] transition-colors"
+            onClick={(e) => { e.stopPropagation(); void downloadImageIds([imageId]) }}
+            aria-label="下载"
+          >
+            <svg className="w-[19px] h-[19px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+          </button>
+          <button
+            className="grid place-items-center w-10 h-10 rounded-[11px] bg-white/[.09] text-white hover:bg-white/[.18] transition-colors"
+            onClick={(e) => { e.stopPropagation(); onClose() }}
+            aria-label="关闭"
+          >
+            <svg className="w-[19px] h-[19px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       </div>
 
-      {/* 左右切换按钮 */}
-      {showNav && !isZoomed && (
-        <>
-          <button
-            className={`${navBtnClass} left-3 sm:left-5`}
-            onClick={(e) => { e.stopPropagation(); goPrev() }}
+      {/* 舞台：居中图片 + 左右导航 */}
+      <div className="relative z-[1] flex-1 min-h-0 flex items-center justify-center px-[18px] pb-11">
+        <div className="relative animate-zoom-in">
+          <div
+            className="relative flex items-center justify-center"
+            style={{
+              transform: `translate(${tx}px, ${ty}px) scale(${s})`,
+              transition: isDragging ? 'none' : 'transform 0.2s ease-out',
+              willChange: 'transform',
+            }}
           >
-            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <button
-            className={`${navBtnClass} right-3 sm:right-5`}
-            onClick={(e) => { e.stopPropagation(); goNext() }}
-          >
-            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-        </>
-      )}
-
-      {/* 底部指示器 */}
-      {showZoomBadge && isZoomed && zoomPercent !== 100 && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
-          <span className="px-3 py-1.5 bg-black/50 text-white/80 text-xs rounded-full backdrop-blur-sm transition-opacity duration-500">
-            {zoomPercent}%
-          </span>
+            <img
+              src={src}
+              data-image-id={imageId}
+              className="saveable-image max-w-[85vw] max-h-[82vh] object-contain rounded-xl shadow-[0_34px_90px_-22px_rgba(0,0,0,0.85)]"
+              onDragStart={(e) => e.preventDefault()}
+              alt=""
+            />
+            {maskPreviewSrc && (
+              <img
+                src={maskPreviewSrc}
+                className="absolute inset-0 w-full h-full object-contain rounded-xl pointer-events-none"
+                alt=""
+              />
+            )}
+          </div>
         </div>
-      )}
-      {showNav && !isZoomed && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
-          <span className="px-3 py-1.5 bg-black/50 text-white/80 text-xs rounded-full backdrop-blur-sm">
-            {currentIndex + 1} / {total}
+
+        {/* 左右切换按钮 */}
+        {showNav && !isZoomed && (
+          <>
+            <button
+              className={`${navBtnClass} left-[18px]`}
+              onClick={(e) => { e.stopPropagation(); goPrev() }}
+              aria-label="上一张"
+            >
+              <svg className="w-[22px] h-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+            <button
+              className={`${navBtnClass} right-[18px]`}
+              onClick={(e) => { e.stopPropagation(); goNext() }}
+              aria-label="下一张"
+            >
+              <svg className="w-[22px] h-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* 缩放倍率指示器 */}
+      {showZoomBadge && isZoomed && zoomPercent !== 100 && (
+        <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2 pointer-events-none">
+          <span className="px-3 py-1.5 rounded-full bg-white/10 text-white/80 font-mono text-xs backdrop-blur-sm transition-opacity duration-500">
+            {zoomPercent}%
           </span>
         </div>
       )}
