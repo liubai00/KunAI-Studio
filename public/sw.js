@@ -1,6 +1,6 @@
 const VERSION = new URL(self.location.href).searchParams.get('v') || 'unknown'
 const CACHE_NAME = `kunai-studio-v${VERSION}`
-const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.svg']
+const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './favicon.svg', './pwa-icon.svg']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

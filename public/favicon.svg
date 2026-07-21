@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <title>KunAI Studio</title>
+  <defs>
+    <linearGradient id="kunai-favicon-bg" x1="7" y1="4" x2="58" y2="61" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111936" />
+      <stop offset="1" stop-color="#050817" />
+    </linearGradient>
+    <linearGradient id="kunai-favicon-core" x1="16" y1="10" x2="49" y2="54" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#c7d2fe" />
+      <stop offset="0.5" stop-color="#6366f1" />
+      <stop offset="1" stop-color="#22d3ee" />
+    </linearGradient>
+    <linearGradient id="kunai-favicon-orbit" x1="5" y1="21" x2="59" y2="47" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#818cf8" stop-opacity="0" />
+      <stop offset="0.52" stop-color="#a5b4fc" />
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0.2" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="url(#kunai-favicon-bg)" />
+  <rect x="1" y="1" width="62" height="62" rx="17" stroke="url(#kunai-favicon-core)" stroke-opacity="0.48" stroke-width="2" />
+  <path d="M20 15V49M21 36L39 15M28 30L44 49" stroke="url(#kunai-favicon-core)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M6 39C17 53 47 55 58 33" stroke="url(#kunai-favicon-orbit)" stroke-width="2" stroke-linecap="round" />
+  <circle cx="52" cy="20" r="3" fill="#67e8f9" />
+  <circle cx="52" cy="20" r="6" fill="#22d3ee" fill-opacity="0.15" />
+</svg>

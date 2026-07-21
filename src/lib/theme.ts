@@ -9,7 +9,6 @@ const LIGHT_THEME_COLOR = '#f4f7ff'
 const DARK_THEME_COLOR = '#070b18'
 
 const listeners = new Set<() => void>()
-const media = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null
 
 function hasStoredPreference(): boolean {
   try {
@@ -34,8 +33,7 @@ function readStoredPreference(): ThemePreference {
 let preference: ThemePreference = readStoredPreference()
 
 export function resolveTheme(pref: ThemePreference = preference): ResolvedTheme {
-  if (pref === 'system') return media?.matches ? 'dark' : 'light'
-  return pref
+  return pref === 'dark' ? 'dark' : 'light'
 }
 
 function applyTheme() {
@@ -51,19 +49,10 @@ function emit() {
   listeners.forEach((listener) => listener())
 }
 
-/**
- * Apply the persisted theme on boot. `defaultPreference` is used only when the
- * user has never chosen a preference (e.g. platform mode defaults to light).
- */
-export function initTheme(defaultPreference: ThemePreference = 'system') {
+// 首次访问固定使用浅色主题；已保存的用户选择仍然优先。
+export function initTheme(defaultPreference: ThemePreference = 'light') {
   if (!hasStoredPreference()) preference = defaultPreference
   applyTheme()
-  media?.addEventListener('change', () => {
-    if (preference === 'system') {
-      applyTheme()
-      emit()
-    }
-  })
 }
 
 export function getThemePreference(): ThemePreference {

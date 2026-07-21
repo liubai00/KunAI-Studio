@@ -15,8 +15,8 @@ const App = lazy(() => import('./App'))
 const platformModeEnabled = isPlatformModeEnabled()
 
 installMobileViewportGuards()
-// 平台首次访问默认使用深空主题，用户切换后继续跟随持久化偏好。
-initTheme(platformModeEnabled ? 'dark' : 'system')
+// 首次访问默认浅色主题，用户切换后继续使用持久化偏好。
+initTheme('light')
 
 if ('serviceWorker' in navigator) {
   if (import.meta.env.PROD) {

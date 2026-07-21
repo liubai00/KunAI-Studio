@@ -39,4 +39,13 @@ describe('workspace UI structure', () => {
     expect(source).toContain('./examples/kunai-creation-workspace.jpg')
     expect(source).toContain('产品界面预览')
   })
+
+  it('uses the KunAI brand mark as the browser icon', () => {
+    const html = readSource('../../index.html')
+    const favicon = readSource('../../public/favicon.svg')
+
+    expect(html).toContain('./favicon.svg?v=kunai-2')
+    expect(favicon).toContain('<title>KunAI Studio</title>')
+    expect(favicon).toContain('id="kunai-favicon-core"')
+  })
 })
