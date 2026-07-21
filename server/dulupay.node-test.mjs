@@ -68,7 +68,7 @@ test('Dulupay client signs create/query requests and verifies provider responses
       response.sign = signDulupayParams(response, platform.privateKey)
       return new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
-    assert.equal(params.method, 'qrcode')
+    assert.equal(params.method, 'web')
     assert.equal(params.type, 'alipay')
     assert.equal(params.money, '20.00')
     assert.equal(new URL(params.return_url).searchParams.get('payment_intent'), params.out_trade_no)
@@ -90,7 +90,7 @@ test('Dulupay client signs create/query requests and verifies provider responses
     platformPublicKey: platform.publicKey,
     notifyUrl: 'https://studio.test/api/platform/payment/dulupay/notify',
     returnUrl: 'https://studio.test/',
-    method: 'qrcode',
+    method: 'web',
     production: true,
     now: () => now,
     fetch: fetcher,
@@ -116,4 +116,35 @@ test('Dulupay client signs create/query requests and verifies provider responses
   callback.sign = signDulupayParams(callback, platform.privateKey)
   assert.equal(client.verifyNotification(callback).paid, true)
   assert.throws(() => client.verifyNotification({ ...callback, money: '21.00' }), (err) => err.code === 'DULUPAY_SIGNATURE_INVALID')
+})
+
+test('Dulupay defaults to web mode and hides merchant-only provider errors from users', async () => {
+  const merchant = createKeyPair()
+  const platform = createKeyPair()
+  const client = new DulupayClient({
+    apiBase: 'https://api.dulupay.com',
+    pid: '1001',
+    privateKey: merchant.privateKey,
+    platformPublicKey: platform.publicKey,
+    notifyUrl: 'https://studio.test/api/platform/payment/dulupay/notify',
+    returnUrl: 'https://studio.test/',
+    production: true,
+    now: () => 1721206072000,
+    fetch: async (_url, init) => {
+      const params = Object.fromEntries(new URLSearchParams(init.body))
+      assert.equal(params.method, 'web')
+      return new Response(JSON.stringify({
+        code: 'pay_create_err',
+        msg: '当前商户余额不足，无法完成支付，请商户登录用户中心充值余额',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    },
+  })
+
+  await assert.rejects(
+    client.createOrder({ outTradeNo: 'bal_1234567890123456', amountMicros: 20000000, name: '余额充值', payType: 'wxpay', clientIp: '203.0.113.1' }),
+    (err) => err.code === 'DULUPAY_ORDER_FAILED'
+      && err.message === '支付通道暂时无法创建订单，请稍后重试或联系管理员'
+      && err.providerCode === 'pay_create_err'
+      && err.providerMessage.includes('商户余额不足'),
+  )
 })

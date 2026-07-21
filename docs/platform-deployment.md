@@ -180,7 +180,7 @@ DULUPAY_MERCHANT_PRIVATE_KEY=<PKCS#8 商户私钥>
 DULUPAY_PLATFORM_PUBLIC_KEY=<X.509 平台公钥>
 DULUPAY_NOTIFY_URL=https://image.kunai.one/api/platform/payment/dulupay/notify
 DULUPAY_RETURN_URL=https://image.kunai.one/
-DULUPAY_METHOD=qrcode
+DULUPAY_METHOD=web
 PLATFORM_RECHARGE_MIN_CNY=1
 PLATFORM_RECHARGE_MAX_CNY=5000
 ```
@@ -207,7 +207,7 @@ X-CSRF-Token: <当前 Session 的 CSRF token>
 {"amount":"20.00","pay_type":"alipay"}
 ```
 
-`pay_type` 只允许 `wxpay` 或 `alipay`。服务端先创建 30 分钟有效的随机结算意向：次数包会快照用户、商品、名称、精确人民币价格和次数；余额充值会快照用户与充值金额。随后服务端以该不可猜测的意向 ID 作为 Dulupay `out_trade_no`，签名调用 `POST https://api.dulupay.com/api/pay/create`，并默认使用 `method=qrcode`。验签后的 `pay_type=qrcode/scan` 响应会把 `pay_info` 作为二维码内容；若商户后台只返回 `pay_type=jump/h5`，则校验 HTTPS 收银台地址并将该地址生成二维码。前端只拿到二维码展示内容与本地结算意向，拿不到商户私钥、签名原文或用户邮箱。
+`pay_type` 只允许 `wxpay` 或 `alipay`。服务端先创建 30 分钟有效的随机结算意向：次数包会快照用户、商品、名称、精确人民币价格和次数；余额充值会快照用户与充值金额。随后服务端以该不可猜测的意向 ID 作为 Dulupay `out_trade_no`，签名调用 `POST https://api.dulupay.com/api/pay/create`，并默认使用 Dulupay 统一下单的 `method=web`。这里的 `method` 是平台接口模式，不是本站的展示开关；验签后的 `pay_type=qrcode/scan` 响应会把 `pay_info` 作为二维码内容，若平台返回 `pay_type=jump/h5`，则校验 HTTPS 收银台地址并将该地址生成二维码。前端只拿到二维码展示内容与本地结算意向，拿不到商户私钥、签名原文或用户邮箱。Dulupay 返回的商户余额、风控或通道内部错误只写入服务端日志，用户端统一显示“支付通道暂时无法创建订单”，避免误导用户去给商户账户充值。
 
 用户在站内支付弹窗扫码，弹窗每 2.5 秒调用一次主动查单，页面隐藏、弹窗关闭、订单过期或支付完成后停止查询。Dulupay 平台订单号、本站订单号、支付渠道、金额、商品快照和状态保存在服务端；浏览器不能把订单直接改成已支付。
 

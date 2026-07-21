@@ -163,7 +163,7 @@ export default function BillingModal(props: BillingModalProps) {
   const renderProductRow = (product: PlatformProduct) => {
     const isMembership = product.kind === 'membership'
     const spec = isMembership ? `${product.duration_days} 天不限次生成` : `${product.credits} 次生成额度`
-    const buyLabel = isMembership && membershipActive ? '续费' : '购买'
+    const buyLabel = isMembership && membershipActive ? '续费并显示收款码' : '显示收款码'
     return (
       <div key={product.id} className="flex items-center gap-3 rounded-xl border border-line bg-surface p-3 transition-colors hover:border-line2">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent-ink">
@@ -275,7 +275,7 @@ export default function BillingModal(props: BillingModalProps) {
                   <input type="number" min={rechargeMin} max={rechargeMax} step="0.01" inputMode="decimal" aria-label="充值金额" value={rechargeAmount} onChange={(event) => { setRechargeAmount(event.target.value); setCheckoutError(null) }} onKeyDown={(event) => { if (event.key === 'Enter') void handleRecharge() }} className="min-w-0 flex-1 bg-transparent font-mono text-sm text-ink outline-none" />
                 </label>
                 <button type="button" onClick={() => void handleRecharge()} disabled={!rechargeValid || recharging || checkoutProductId !== null} className="inline-flex h-10 items-center justify-center gap-2 rounded-[11px] bg-[linear-gradient(150deg,var(--accent),#0891b2)] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition hover:-translate-y-px active:scale-[0.99] disabled:opacity-50 disabled:hover:translate-y-0">
-                  {recharging ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <>扫码支付<ScanLine className="h-4 w-4" /></>}
+                  {recharging ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <>生成收款码<ScanLine className="h-4 w-4" /></>}
                 </button>
               </div>
             ) : (

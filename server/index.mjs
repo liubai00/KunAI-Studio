@@ -113,7 +113,7 @@ function loadConfig(env) {
       platformPublicKey: String(env.DULUPAY_PLATFORM_PUBLIC_KEY || '').trim(),
       notifyUrl: String(env.DULUPAY_NOTIFY_URL || '').trim(),
       returnUrl: String(env.DULUPAY_RETURN_URL || '').trim(),
-      method: String(env.DULUPAY_METHOD || 'qrcode').trim(),
+      method: String(env.DULUPAY_METHOD || 'web').trim(),
       timeoutMs: Number(env.DULUPAY_TIMEOUT_MS || 10000),
       timestampSkewSeconds: Number(env.DULUPAY_TIMESTAMP_SKEW_SECONDS || 300),
     },

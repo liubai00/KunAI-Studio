@@ -17,6 +17,13 @@ function cleanProviderMessage(value, fallback) {
   return text ? text.slice(0, 200) : fallback
 }
 
+function createProviderError(message, response, code) {
+  const err = createError(message, 502, code)
+  err.providerCode = cleanProviderMessage(response.code, 'unknown')
+  err.providerMessage = cleanProviderMessage(response.msg, 'unknown')
+  return err
+}
+
 function parsePrivateKey(value) {
   if (value?.type === 'private') return value
   const key = String(value || '').trim().replace(/\\n/g, '\n')
@@ -118,7 +125,7 @@ export class DulupayClient {
     this.platformPublicKey = options.platformPublicKey
     this.notifyUrl = String(options.notifyUrl || '').trim()
     this.returnUrl = String(options.returnUrl || '').trim()
-    this.method = String(options.method || 'qrcode').trim()
+    this.method = String(options.method || 'web').trim()
     this.timeoutMs = Number(options.timeoutMs || 10000)
     this.timestampSkewSeconds = Number(options.timestampSkewSeconds || 300)
     this.production = Boolean(options.production)
@@ -137,7 +144,7 @@ export class DulupayClient {
     if (this.production && [apiUrl, notifyUrl, returnUrl].some((url) => url.protocol !== 'https:')) {
       throw createError('生产环境 Dulupay 地址必须使用 HTTPS', 500, 'DULUPAY_INSECURE_URL')
     }
-    if (!['qrcode', 'jump'].includes(this.method)) throw createError('Dulupay 支付展示方式无效', 500, 'DULUPAY_METHOD_UNSUPPORTED')
+    if (!['web', 'qrcode', 'jump'].includes(this.method)) throw createError('Dulupay 支付接口模式无效', 500, 'DULUPAY_METHOD_UNSUPPORTED')
     this.privateKey = parsePrivateKey(this.privateKey)
     this.platformPublicKey = parsePublicKey(this.platformPublicKey)
   }
@@ -205,7 +212,7 @@ export class DulupayClient {
       money: formatDulupayMoney(options.amountMicros),
       clientip: String(options.clientIp || '127.0.0.1'),
     })
-    if (response.code !== '0') throw createError(`Dulupay：${cleanProviderMessage(response.msg, '下单失败')}`, 502, 'DULUPAY_ORDER_FAILED')
+    if (response.code !== '0') throw createProviderError('支付通道暂时无法创建订单，请稍后重试或联系管理员', response, 'DULUPAY_ORDER_FAILED')
     this.verifyResponse(response)
     if (!response.trade_no || response.trade_no.length > 128) throw createError('Dulupay 未返回有效平台订单号', 502, 'DULUPAY_INVALID_RESPONSE')
     const display = normalizeDulupayPaymentInfo(response.pay_type, response.pay_info, this.production)
@@ -214,7 +221,7 @@ export class DulupayClient {
 
   async queryOrder(outTradeNo) {
     const response = await this.postForm('/api/pay/query', { pid: this.pid, out_trade_no: outTradeNo })
-    if (response.code !== '0') throw createError(`Dulupay：${cleanProviderMessage(response.msg, '查单失败')}`, 502, 'DULUPAY_QUERY_FAILED')
+    if (response.code !== '0') throw createProviderError('暂时无法查询支付结果，请稍后重试', response, 'DULUPAY_QUERY_FAILED')
     this.verifyResponse(response)
     if (response.pid !== this.pid || response.out_trade_no !== outTradeNo) {
       throw createError('Dulupay 查单信息不匹配', 502, 'DULUPAY_QUERY_MISMATCH')
