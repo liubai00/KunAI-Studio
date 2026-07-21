@@ -475,11 +475,16 @@ async function createPlatformAgentHttpError(response: Response, stream: boolean)
   } catch {
     /* ignore */
   }
-  return new PlatformAgentHttpError(maybeAppendStreamingHint(message, response.status, stream), response.status, code)
+  const displayMessage = code ? message : maybeAppendStreamingHint(message, response.status, stream)
+  return new PlatformAgentHttpError(displayMessage, response.status, code)
 }
 
 export function isPlatformAgentCallFailedError(err: unknown) {
   return err instanceof PlatformAgentHttpError && err.code === 'AGENT_CALL_FAILED'
+}
+
+export function isPlatformUserContextChangedError(err: unknown) {
+  return err instanceof Error && 'code' in err && err.code === 'USER_CONTEXT_CHANGED'
 }
 
 async function readJsonServerSentEvents(response: Response, onEvent: (event: Record<string, unknown>) => void | Promise<void>, signals: Array<AbortSignal | undefined> = []): Promise<void> {

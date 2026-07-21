@@ -1068,7 +1068,11 @@ export default function AgentWorkspace() {
                       >
                         {(() => {
                           const content = message.content.replace(/^请求失败：/, '');
-                          const [mainErr, ...hints] = content.split('\n提示：');
+                          const [mainErr, ...rawHints] = content.split('\n提示：');
+                          const accountContextChanged = mainErr.includes('账户已在其他页面切换')
+                          const hints = accountContextChanged
+                            ? rawHints.filter((hint) => !hint.includes('流式传输'))
+                            : rawHints
                           return (
                             <>
                               <div className="flex items-start gap-2 text-red-500 dark:text-red-400">
@@ -1083,6 +1087,11 @@ export default function AgentWorkspace() {
                                 <div className="pl-[26px] mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed text-ink-2 break-words opacity-90">
                                   <span className="font-medium">提示：</span>{hints.join('\n提示：')}
                                 </div>
+                              )}
+                              {accountContextChanged && (
+                                <button type="button" onClick={() => window.location.reload()} className="ml-[26px] mt-3 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-500 transition hover:bg-red-500/15 dark:text-red-400">
+                                  刷新页面
+                                </button>
                               )}
                             </>
                           );

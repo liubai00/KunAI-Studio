@@ -42,7 +42,7 @@ import {
   storeImageWithSize,
 } from './lib/db'
 import { callImageApi } from './lib/api'
-import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, callPlatformSearchWeb, finishPlatformAgentRound, isPlatformAgentCallFailedError, parseBatchImageCallArguments, type AgentApiResultImage, type PlatformSearchWebInput } from './lib/agentApi'
+import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, callPlatformSearchWeb, finishPlatformAgentRound, isPlatformAgentCallFailedError, isPlatformUserContextChangedError, parseBatchImageCallArguments, type AgentApiResultImage, type PlatformSearchWebInput } from './lib/agentApi'
 import { collectAgentRoundOutputImageSlots, extractAgentReferenceIds, getAgentCurrentReferenceId, getAgentGeneratedImageReferenceId, replaceAgentPromptImageReferencesForApi } from './lib/agentImageReferences'
 import { showBrowserNotification } from './lib/browserNotification'
 import { IMAGE_FETCH_CORS_HINT } from './lib/imageApiShared'
@@ -868,6 +868,7 @@ interface AppState {
   setActiveAgentRoundId: (conversationId: string, roundId: string | null) => void
   renameAgentConversation: (id: string, title: string) => void
   setAgentConversationOptions: (id: string, options: { modelId?: string; searchEnabled?: boolean }) => void
+  selectAgentConversationModel: (id: string, modelId: string) => 'updated' | 'created' | 'busy' | 'unchanged'
   deleteAgentConversation: (id: string) => void
   setAgentSidebarCollapsed: (collapsed: boolean) => void
   setAgentAssetTab: (tab: 'references' | 'outputs') => void
@@ -1499,6 +1500,51 @@ export const useStore = create<AppState>()(
           return { ...conversation, ...options, updatedAt: Date.now() }
         }),
       })),
+      selectAgentConversationModel: (id, modelId) => {
+        const nextModelId = modelId.trim()
+        if (!nextModelId) return 'unchanged'
+        let result: 'updated' | 'created' | 'busy' | 'unchanged' = 'unchanged'
+        set((state) => {
+          const current = state.agentConversations.find((conversation) => conversation.id === id)
+          if (!current || current.modelId === nextModelId) return {}
+          if (current.rounds.some((round) => round.status === 'running')) {
+            result = 'busy'
+            return {}
+          }
+          if (current.rounds.length === 0) {
+            result = 'updated'
+            return {
+              agentConversations: state.agentConversations.map((conversation) =>
+                conversation.id === id ? { ...conversation, modelId: nextModelId, updatedAt: Date.now() } : conversation,
+              ),
+            }
+          }
+
+          const now = Date.now()
+          const conversation = {
+            ...createAgentConversation(now),
+            modelId: nextModelId,
+            searchEnabled: current.searchEnabled,
+          }
+          const activeDraft = state.activeAgentConversationId === id ? getCurrentAgentInputDraft(state) : null
+          const savedDrafts = saveActiveAgentInputDrafts(state)
+          const agentInputDrafts = activeDraft
+            ? setAgentInputDraft(savedDrafts, conversation.id, activeDraft)
+            : savedDrafts
+          result = 'created'
+          return {
+            agentConversations: [...state.agentConversations, conversation],
+            activeAgentConversationId: conversation.id,
+            agentInputDrafts,
+            agentSidebarCollapsed: true,
+            agentAssetPanelCollapsed: true,
+            agentEditingRoundId: null,
+            agentEditingConversationId: null,
+            ...restoreAgentInputDraftState(agentInputDrafts, conversation.id),
+          }
+        })
+        return result
+      },
       deleteAgentConversation: (id) => set((state) => {
         const agentInputDrafts = { ...state.agentInputDrafts }
         delete agentInputDrafts[id]
@@ -4445,6 +4491,7 @@ async function executeAgentRound(
     let responseStep = resume ? Math.max(0, Math.trunc(Number(round.responseSteps) || 0)) : 0
     let requestAttemptId = round.requestAttemptId || round.id
     const retriedFailedResponseSteps = new Set<number>()
+    let retriedUserContext = false
 
     // Helper: resolve reference image ids to data URLs for batch image calls
     const resolveReferenceImages = async (referenceIds: string[]): Promise<{ dataUrls: string[]; imageIds: string[] }> => {
@@ -5046,6 +5093,11 @@ async function executeAgentRound(
             : undefined,
         })
       } catch (err) {
+        if (isPlatformModeEnabled() && isPlatformUserContextChangedError(err) && !retriedUserContext) {
+          retriedUserContext = true
+          await usePlatformStore.getState().refreshSession()
+          continue
+        }
         if (isPlatformModeEnabled() && isPlatformAgentCallFailedError(err) && !retriedFailedResponseSteps.has(responseStep)) {
           retriedFailedResponseSteps.add(responseStep)
           requestAttemptId = genId()

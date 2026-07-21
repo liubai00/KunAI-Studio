@@ -119,6 +119,7 @@ vi.mock('./lib/agentApi', () => ({
   })),
   finishPlatformAgentRound: vi.fn(async () => undefined),
   isPlatformAgentCallFailedError: vi.fn(() => false),
+  isPlatformUserContextChangedError: vi.fn((err: unknown) => err instanceof Error && 'code' in err && err.code === 'USER_CONTEXT_CHANGED'),
   callBatchImageSingle: vi.fn(async (opts: { batchItemId: string; prompt: string }) => ({
     batchItemId: opts.batchItemId,
     image: { dataUrl: 'data:image/png;base64,batch-output', revisedPrompt: opts.prompt },
@@ -1447,6 +1448,12 @@ describe('fal task recovery', () => {
 describe('agent conversation creation', () => {
   beforeEach(() => {
     useStore.setState({
+      appMode: 'agent',
+      prompt: '',
+      inputImages: [],
+      maskDraft: null,
+      maskEditorImageId: null,
+      agentInputDrafts: {},
       agentConversations: [],
       activeAgentConversationId: null,
       agentSidebarCollapsed: false,
@@ -1515,6 +1522,55 @@ describe('agent conversation creation', () => {
     expect(state.agentConversations[state.agentConversations.length - 1]).toMatchObject({ id, createdAt: 3_000, updatedAt: 3_000, messages: [], rounds: [] })
     expect(state.activeAgentConversationId).toBe(id)
     now.mockRestore()
+  })
+
+  it('keeps model selection available by starting a new conversation after a completed round', () => {
+    const used = agentConversation({
+      id: 'used-conversation',
+      modelId: 'gpt-5.5',
+      searchEnabled: false,
+      activeRoundId: 'round-a',
+      rounds: [{
+        id: 'round-a',
+        index: 1,
+        parentRoundId: null,
+        userMessageId: 'message-a',
+        prompt: '继续完善',
+        inputImageIds: [],
+        outputTaskIds: [],
+        status: 'done',
+        error: null,
+        createdAt: 1,
+        finishedAt: 2,
+      }],
+      messages: [{ id: 'message-a', role: 'user', content: '继续完善', roundId: 'round-a', createdAt: 1 }],
+    })
+    useStore.setState({
+      prompt: '带到新模型的草稿',
+      agentConversations: [used],
+      activeAgentConversationId: used.id,
+    })
+
+    const result = useStore.getState().selectAgentConversationModel(used.id, 'gpt-5.6-sol')
+    const state = useStore.getState()
+    const next = state.agentConversations.find((conversation) => conversation.id === state.activeAgentConversationId)
+
+    expect(result).toBe('created')
+    expect(state.agentConversations).toHaveLength(2)
+    expect(state.agentConversations.find((conversation) => conversation.id === used.id)?.modelId).toBe('gpt-5.5')
+    expect(next).toMatchObject({ modelId: 'gpt-5.6-sol', searchEnabled: false, rounds: [], messages: [] })
+    expect(state.prompt).toBe('带到新模型的草稿')
+  })
+
+  it('changes the model in place before the first round', () => {
+    const empty = agentConversation({ id: 'empty-conversation', modelId: 'gpt-5.5' })
+    useStore.setState({ agentConversations: [empty], activeAgentConversationId: empty.id })
+
+    const result = useStore.getState().selectAgentConversationModel(empty.id, 'gpt-5.6-terra')
+
+    expect(result).toBe('updated')
+    expect(useStore.getState().agentConversations).toHaveLength(1)
+    expect(useStore.getState().agentConversations[0].modelId).toBe('gpt-5.6-terra')
   })
 })
 

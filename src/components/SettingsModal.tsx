@@ -1892,6 +1892,23 @@ export default function SettingsModal() {
 
                   <section className="mt-8">
                     <div className="mb-3 flex items-end justify-between gap-4">
+                      <div><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent-ink">Product experience</p><h5 className="mt-1 text-base font-semibold text-ink">产品界面预览</h5></div>
+                      <span className="text-xs text-ink-3">点击图片查看完整界面</span>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <a href="./examples/kunai-login-workspace.jpg" target="_blank" rel="noopener noreferrer" className="group overflow-hidden rounded-[20px] border border-line bg-surface2 transition hover:-translate-y-0.5 hover:border-line2 hover:shadow-card">
+                        <img src="./examples/kunai-login-workspace.jpg" alt="KunAI Studio 品牌登录工作台" loading="lazy" className="aspect-[16/9] w-full object-cover" />
+                        <span className="block px-4 py-3 text-sm font-semibold text-ink">品牌登录工作台</span>
+                      </a>
+                      <a href="./examples/kunai-creation-workspace.jpg" target="_blank" rel="noopener noreferrer" className="group overflow-hidden rounded-[20px] border border-line bg-surface2 transition hover:-translate-y-0.5 hover:border-line2 hover:shadow-card">
+                        <img src="./examples/kunai-creation-workspace.jpg" alt="KunAI Studio 星图创作工作区" loading="lazy" className="aspect-[16/9] w-full object-cover" />
+                        <span className="block px-4 py-3 text-sm font-semibold text-ink">星图创作工作区</span>
+                      </a>
+                    </div>
+                  </section>
+
+                  <section className="mt-8">
+                    <div className="mb-3 flex items-end justify-between gap-4">
                       <div><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent-ink">Creation showcase</p><h5 className="mt-1 text-base font-semibold text-ink">创作示例</h5></div>
                       <span className="text-xs text-ink-3">更多案例持续更新</span>
                     </div>

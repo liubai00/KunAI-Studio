@@ -1339,7 +1339,13 @@ button.kunai-settings-card:hover { transform: translateY(-2px); border-color: va
 }
 
 [data-shell-view='agent'] [data-input-bar] {
-  max-width: 760px;
+  left: calc(50% + 124px);
+  max-width: min(1180px, calc(100vw - 280px));
+}
+
+.is-collapsed[data-shell-view='agent'] [data-input-bar] {
+  left: calc(50% + 36px);
+  max-width: min(1180px, calc(100vw - 96px));
 }
 
 @media (max-width: 1279px) {
@@ -1352,6 +1358,8 @@ button.kunai-settings-card:hover { transform: translateY(-2px); border-color: va
   .kunai-shell:not(.is-collapsed) .kunai-sidebar > div:first-child { justify-content: center; padding-inline: 0; }
   .kunai-shell:not(.is-collapsed) .kunai-sidebar > div:first-child > button { display: none; }
   .kunai-shell:not(.is-collapsed) .kunai-sidebar .kunai-status-card { justify-content: center; padding: 0.5rem; }
+  .kunai-shell:not(.is-collapsed)[data-shell-view='agent'] [data-input-bar] { left: calc(50% + 40px); max-width: calc(100vw - 104px); }
+  .is-collapsed[data-shell-view='agent'] [data-input-bar] { left: calc(50% + 36px); max-width: calc(100vw - 96px); }
 }
 
 @media (max-width: 1023px) {
@@ -1393,7 +1401,8 @@ button.kunai-settings-card:hover { transform: translateY(-2px); border-color: va
   .kunai-admin-overview-panel { align-items: stretch; flex-direction: column; }
   .kunai-embedded-modal > section { border-radius: 18px; }
   [data-shell-view='agent'] [data-agent-workspace] { min-height: calc(100vh - 128px); padding-inline: 0.6rem; }
-  [data-shell-view='agent'] [data-input-bar] { bottom: calc(72px + var(--safe-area-bottom)); }
+  .kunai-shell:not(.is-collapsed)[data-shell-view='agent'] [data-input-bar],
+  .kunai-shell.is-collapsed[data-shell-view='agent'] [data-input-bar] { left: 50%; bottom: calc(72px + var(--safe-area-bottom)); max-width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -23,9 +23,20 @@ describe('workspace UI structure', () => {
     const inputBar = readSource('./InputBar.tsx')
     const workspace = readSource('./AgentWorkspace.tsx')
 
+    expect(inputBar).toContain('data-composer-control-row')
     expect(inputBar).toContain('data-agent-composer-tools')
     expect(inputBar).toContain('data-agent-search-toggle')
+    expect(inputBar).toContain('selectAgentConversationModel')
+    expect(inputBar).not.toContain('disabled={modelLocked}')
     expect(workspace).not.toContain('<select')
     expect(`${inputBar}\n${workspace}`).not.toMatch(/searchPrice|search_price|联网搜索.*¥/)
+  })
+
+  it('shows the login and creation workspaces in the product introduction', () => {
+    const source = readSource('./SettingsModal.tsx')
+
+    expect(source).toContain('./examples/kunai-login-workspace.jpg')
+    expect(source).toContain('./examples/kunai-creation-workspace.jpg')
+    expect(source).toContain('产品界面预览')
   })
 })

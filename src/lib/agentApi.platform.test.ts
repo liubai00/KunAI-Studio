@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
 import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from './apiProfiles'
-import { callAgentConversationTitleApi, callAgentResponsesApi, callPlatformSearchWeb, finishPlatformAgentRound, isPlatformAgentCallFailedError } from './agentApi'
+import { callAgentConversationTitleApi, callAgentResponsesApi, callPlatformSearchWeb, finishPlatformAgentRound, isPlatformAgentCallFailedError, isPlatformUserContextChangedError } from './agentApi'
 import { PLATFORM_AGENT_PROFILE_ID } from './platformMode'
 
 function createResponse(body: Record<string, unknown>) {
@@ -141,6 +141,33 @@ describe('platform Agent API requests', () => {
       code: 'AGENT_CALL_FAILED',
       message: 'Agent upstream call failed',
     })
+  })
+
+  it('keeps structured account context errors free of unrelated streaming hints', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      success: false,
+      message: '账户已在其他页面切换，请刷新后重试',
+      code: 'USER_CONTEXT_CHANGED',
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    const err = await callAgentResponsesApi({
+      settings: DEFAULT_SETTINGS,
+      profile: { ...createPlatformProfile(), streamImages: true },
+      params: DEFAULT_PARAMS,
+      input: [],
+      context: { conversationId: 'conversation-1', roundId: 'round-1', stepKey: 'step-context' },
+    }).catch((value: unknown) => value)
+
+    expect(isPlatformUserContextChangedError(err)).toBe(true)
+    expect(err).toMatchObject({
+      status: 409,
+      code: 'USER_CONTEXT_CHANGED',
+      message: '账户已在其他页面切换，请刷新后重试',
+    })
+    expect(String((err as Error).message)).not.toContain('流式传输')
   })
 
   it('retries an ambiguous round finish with the same idempotency context', async () => {

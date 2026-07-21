@@ -418,6 +418,7 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
   const agentConversations = useStore((s) => s.agentConversations)
   const activeAgentConversationId = useStore((s) => s.activeAgentConversationId)
   const setAgentConversationOptions = useStore((s) => s.setAgentConversationOptions)
+  const selectAgentConversationModel = useStore((s) => s.selectAgentConversationModel)
   const filterStatus = useStore((s) => s.filterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
@@ -1956,13 +1957,19 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
     const searchEnabled = Boolean(activeAgentConversation.searchEnabled)
 
     return (
-      <div data-agent-composer-tools className="mt-3 flex min-w-0 items-center gap-2 border-b border-line px-1 pb-3">
-        <div className="min-w-0 max-w-[15rem] flex-1 sm:flex-none sm:w-[13rem]" title={modelLocked ? '模型已按对话锁定；如需切换请新建对话' : undefined}>
+      <div data-agent-composer-tools className="flex min-w-0 items-center gap-2 border-b border-line px-1 pb-3 lg:flex-none lg:border-b-0 lg:px-0 lg:pb-0">
+        <div className="min-w-0 max-w-[15rem] flex-1 sm:flex-none sm:w-[13rem] lg:w-[10rem] xl:w-[12rem]" title={modelLocked ? '模型已按对话锁定；如需切换请新建对话' : undefined}>
           <Select
             value={selectedAgentModel}
-            onChange={(value) => setAgentConversationOptions(activeAgentConversation.id, { modelId: String(value) })}
+            onChange={(value) => {
+              const result = selectAgentConversationModel(activeAgentConversation.id, String(value))
+              if (result === 'busy') {
+                showToast('请先停止当前回复，再切换模型', 'info')
+              } else if (result === 'created') {
+                showToast(`已切换至 ${String(value)}，并自动开始新对话`, 'info')
+              }
+            }}
             options={agentModelOptions}
-            disabled={modelLocked}
             ariaLabel="Agent 对话模型"
             className="h-11 rounded-xl border border-line bg-surface2 px-3 text-xs font-semibold text-ink transition-colors hover:border-line2 focus-visible:border-accent sm:h-9"
           />
@@ -1978,10 +1985,10 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
           className={`inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition-colors sm:h-9 sm:min-w-0 ${searchEnabled && searchConfigured ? 'border-accent/40 bg-accent-soft text-accent-ink' : 'border-line bg-surface2 text-ink-3 hover:border-line2 hover:text-ink'} disabled:cursor-not-allowed disabled:opacity-50`}
         >
           <Globe2 className="h-4 w-4" />
-          <span className="hidden sm:inline">联网</span>
+          <span className="hidden sm:inline lg:hidden xl:inline">联网</span>
         </button>
-        {modelLocked && <span className="hidden min-w-0 items-center gap-1 truncate text-[11px] text-ink-3 md:inline-flex"><LockKeyhole className="h-3.5 w-3.5 shrink-0" />模型已锁定</span>}
-        {!searchConfigured && <span className="hidden truncate text-[11px] text-ink-3 sm:inline">联网搜索服务暂不可用</span>}
+        {modelLocked && <span className="hidden min-w-0 items-center gap-1 truncate text-[11px] text-ink-3 md:inline-flex lg:hidden"><LockKeyhole className="h-3.5 w-3.5 shrink-0" />切换后新建对话</span>}
+        {!searchConfigured && <span className="hidden truncate text-[11px] text-ink-3 sm:inline lg:hidden">联网搜索服务暂不可用</span>}
       </div>
     )
   }
@@ -2156,12 +2163,12 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
             )}
           </div>
 
-          {renderAgentControls()}
-
           {/* 参数 + 按钮 */}
-          <div className="mt-3">
+          <div data-composer-control-row className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end">
+            {renderAgentControls()}
+
             {/* 桌面端布局 */}
-            <div className="hidden sm:flex items-end justify-between gap-4">
+            <div className="hidden min-w-0 flex-1 items-end justify-between gap-4 sm:flex lg:gap-3 xl:gap-4">
               {renderParams('grid-cols-6')}
 
               <div className="flex gap-2.5 flex-shrink-0 mb-0.5">
