@@ -223,7 +223,6 @@ export default function AuthScreen() {
               <span className="mt-1 block text-xs leading-5 text-ink-3">从灵感、参考图到 4K 成片，在同一工作台持续打磨。</span>
             </figcaption>
           </figure>
-          <p className="mt-4 text-[11px] leading-5 text-ink-3">基于 GPT Image Playground（MIT）二次开发，并由 KunAI Studio 持续扩展平台账户、计费支付、Agent、联网搜索与企业管理能力。</p>
           <div className="kunai-auth-orbit" aria-hidden="true"><i /><i /><i /></div>
         </section>
         <section className="w-full max-w-[460px] justify-self-center rounded-[24px] border border-line2 bg-surface/95 p-6 shadow-lift backdrop-blur-2xl sm:p-8 lg:justify-self-end">

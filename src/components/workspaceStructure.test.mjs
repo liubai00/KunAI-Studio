@@ -48,4 +48,12 @@ describe('workspace UI structure', () => {
     expect(favicon).toContain('<title>KunAI Studio</title>')
     expect(favicon).toContain('id="kunai-favicon-core"')
   })
+
+  it('keeps the license disclosure in About instead of repeating it on login', () => {
+    const auth = readSource('./auth/AuthScreen.tsx')
+    const settings = readSource('./SettingsModal.tsx')
+
+    expect(auth).not.toContain('基于 GPT Image Playground（MIT）二次开发')
+    expect(settings).toContain('KunAI Studio 基于 GPT Image Playground 的 MIT 许可代码进行二次开发')
+  })
 })
