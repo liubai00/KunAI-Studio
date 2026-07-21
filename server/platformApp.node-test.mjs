@@ -300,7 +300,7 @@ test('Dulupay checkout, callback and active recheck settle credit packs and CNY 
   const dulupay = {
     async createOrder(options) {
       orders.set(options.outTradeNo, options)
-      return { payUrl: `https://cashier.test/${options.outTradeNo}`, tradeNo: `provider-${options.outTradeNo}`, payType: options.payType }
+      return { presentation: 'qrcode', qrContent: `weixin://wxpay/bizpayurl?order=${options.outTradeNo}`, payUrl: null, tradeNo: `provider-${options.outTradeNo}`, payType: options.payType }
     },
     verifyNotification(params) {
       if (params.sign !== 'valid') throw Object.assign(new Error('invalid'), { code: 'DULUPAY_SIGNATURE_INVALID' })
@@ -316,7 +316,7 @@ test('Dulupay checkout, callback and active recheck settle credit packs and CNY 
       const order = orders.get(outTradeNo)
       return {
         paid: true,
-        tradeNo: `query-${outTradeNo}`,
+        tradeNo: `provider-${outTradeNo}`,
         outTradeNo,
         amountMicros: order.amountMicros,
         params: {},
@@ -345,12 +345,14 @@ test('Dulupay checkout, callback and active recheck settle credit packs and CNY 
   assert.equal(response.status, 201)
   const productCheckout = (await response.json()).data
   assert.equal(productCheckout.kind, 'credits')
-  assert.equal(productCheckout.checkout_url, `https://cashier.test/${productCheckout.checkout_intent_id}`)
+  assert.equal(productCheckout.checkout_url, null)
+  assert.equal(productCheckout.payment_display, 'qrcode')
+  assert.equal(productCheckout.qr_content, `weixin://wxpay/bizpayurl?order=${productCheckout.checkout_intent_id}`)
   assert.equal(orders.get(productCheckout.checkout_intent_id).payType, 'alipay')
 
   const productNotify = new URLSearchParams({
     sign: 'valid',
-    trade_no: 'dulu-product-1',
+    trade_no: `provider-${productCheckout.checkout_intent_id}`,
     out_trade_no: productCheckout.checkout_intent_id,
     money: '8.00',
   })
@@ -371,7 +373,7 @@ test('Dulupay checkout, callback and active recheck settle credit packs and CNY 
   assert.equal(balanceCheckout.kind, 'balance')
   const balanceNotify = new URLSearchParams({
     sign: 'valid',
-    trade_no: 'dulu-balance-1',
+    trade_no: `provider-${balanceCheckout.checkout_intent_id}`,
     out_trade_no: balanceCheckout.checkout_intent_id,
     money: '20.00',
   })
@@ -393,6 +395,41 @@ test('Dulupay checkout, callback and active recheck settle credit packs and CNY 
   assert.equal(payload.data.paid, true)
   assert.equal(payload.data.kind, 'balance')
   assert.equal((await (await fetch(`${baseUrl}/api/platform/session`, { headers: { Cookie: cookie } })).json()).data.quota, 30000000)
+
+  response = await fetch(`${baseUrl}/api/platform/payment/checkout`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ amount: '5.00', pay_type: 'wxpay' }),
+  })
+  const concurrentIntent = (await response.json()).data.checkout_intent_id
+  const concurrentNotify = new URLSearchParams({
+    sign: 'valid',
+    trade_no: `provider-${concurrentIntent}`,
+    out_trade_no: concurrentIntent,
+    money: '5.00',
+  })
+  const [notifyResult, recheckResult] = await Promise.all([
+    fetch(`${baseUrl}/api/platform/payment/dulupay/notify?${concurrentNotify}`),
+    fetch(`${baseUrl}/api/platform/payment/recheck`, { method: 'POST', headers, body: JSON.stringify({ checkout_intent_id: concurrentIntent }) }),
+  ])
+  assert.equal(await notifyResult.text(), 'success')
+  assert.equal((await recheckResult.json()).data.paid, true)
+  assert.equal((await (await fetch(`${baseUrl}/api/platform/session`, { headers: { Cookie: cookie } })).json()).data.quota, 35000000)
+
+  response = await fetch(`${baseUrl}/api/platform/payment/checkout`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ amount: '7.00', pay_type: 'alipay' }),
+  })
+  const mismatchedIntent = (await response.json()).data.checkout_intent_id
+  const mismatchedNotify = new URLSearchParams({
+    sign: 'valid',
+    trade_no: `provider-${mismatchedIntent}`,
+    out_trade_no: mismatchedIntent,
+    money: '7.01',
+  })
+  assert.equal(await (await fetch(`${baseUrl}/api/platform/payment/dulupay/notify?${mismatchedNotify}`)).text(), 'fail')
+  assert.equal((await (await fetch(`${baseUrl}/api/platform/session`, { headers: { Cookie: cookie } })).json()).data.quota, 35000000)
   assert.equal(adminId, 1)
 })
 
@@ -846,7 +883,17 @@ test('admins generate redemption codes and users redeem them over HTTP', async (
   assert.equal(codes.length, 2)
 
   r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes`, { headers: { Cookie: cookie } })
-  assert.equal((await r.json()).data.length, 2)
+  let listed = (await r.json()).data
+  assert.equal(listed.length, 2)
+  assert.equal(listed[0].enabled, true)
+  assert.equal(listed[0].max_redemptions, 1)
+
+  r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes/${codes[1]}`, { method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ enabled: false }) })
+  assert.equal(r.status, 200)
+  assert.equal((await r.json()).data.enabled, false)
+  r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes?status=disabled`, { headers: { Cookie: cookie } })
+  listed = (await r.json()).data
+  assert.deepEqual(listed.map((item) => item.code), [codes[1]])
 
   // redeem (dash/case-insensitive)
   r = await fetch(`${baseUrl}/api/platform/redeem`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ code: codes[0].toLowerCase() }) })
@@ -863,6 +910,33 @@ test('admins generate redemption codes and users redeem them over HTTP', async (
   // generating codes requires admin + CSRF
   r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes`, { method: 'POST', headers: { Origin: 'http://studio.test', Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ credits: 1, count: 1 }) })
   assert.equal(r.status, 403)
+
+  const userEmail = 'ordinary-redeemer@example.com'
+  r = await fetch(`${baseUrl}/api/platform/auth/verification`, { method: 'POST', headers: { Origin: 'http://studio.test', 'Content-Type': 'application/json' }, body: JSON.stringify({ email: userEmail }) })
+  const verificationCode = (await r.json()).data.dev_code
+  await fetch(`${baseUrl}/api/platform/auth/register`, { method: 'POST', headers: { Origin: 'http://studio.test', 'Content-Type': 'application/json' }, body: JSON.stringify({ email: userEmail, password: 'ordinary user password', verification_code: verificationCode }) })
+  r = await fetch(`${baseUrl}/api/platform/auth/login`, { method: 'POST', headers: { Origin: 'http://studio.test', 'Content-Type': 'application/json' }, body: JSON.stringify({ email: userEmail, password: 'ordinary user password' }) })
+  const userCookie = readCookies(r)
+  const userCsrf = readCookie(userCookie, 'kunai_studio_csrf')
+  const userHeaders = { Origin: 'http://studio.test', Cookie: userCookie, 'Content-Type': 'application/json', 'X-CSRF-Token': userCsrf }
+  r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes`, { method: 'POST', headers: userHeaders, body: JSON.stringify({ credits: 100, count: 1 }) })
+  assert.equal(r.status, 403)
+  r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes`, { headers: { Cookie: userCookie } })
+  assert.equal(r.status, 403)
+  r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes/${codes[0]}`, { method: 'PATCH', headers: userHeaders, body: JSON.stringify({ enabled: false }) })
+  assert.equal(r.status, 403)
+
+  r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ credits: 3, count: 1, max_redemptions: 1, note: 'concurrency' }) })
+  const [limitedCode] = (await r.json()).data.codes
+  const concurrentRedeems = await Promise.all([
+    fetch(`${baseUrl}/api/platform/redeem`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ code: limitedCode }) }),
+    fetch(`${baseUrl}/api/platform/redeem`, { method: 'POST', headers: userHeaders, body: JSON.stringify({ code: limitedCode }) }),
+  ])
+  assert.deepEqual(concurrentRedeems.map((response) => response.status).sort(), [200, 409])
+  r = await fetch(`${baseUrl}/api/platform/admin/redemption-codes?search=${limitedCode}`, { headers: { Cookie: cookie } })
+  const [limited] = (await r.json()).data
+  assert.equal(limited.redemption_count, 1)
+  assert.equal(limited.remaining_redemptions, 0)
 
   assert.ok(adminId)
 })

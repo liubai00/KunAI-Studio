@@ -1,11 +1,12 @@
-import { Coins, Crown, ExternalLink, LoaderCircle, Ticket, Wallet, X } from 'lucide-react'
+import { Coins, Crown, LoaderCircle, ScanLine, Ticket, Wallet, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { createPlatformBalanceCheckout, createPlatformProductCheckout } from '../../lib/platformCheckout'
-import type { PlatformPaymentType } from '../../lib/platformCheckout'
+import type { PlatformPaymentType, PlatformProductCheckout } from '../../lib/platformCheckout'
 import { formatPlatformPrice, formatPlatformQuota } from '../../lib/platformCurrency'
 import { usePlatformStore } from '../../platformStore'
 import type { PlatformBilling, PlatformProduct } from '../../platformStore'
+import PaymentQrModal from './PaymentQrModal'
 
 interface BillingModalProps {
   onClose: () => void
@@ -27,6 +28,7 @@ export default function BillingModal(props: BillingModalProps) {
   const [billingError, setBillingError] = useState<string | null>(null)
   const [checkoutProductId, setCheckoutProductId] = useState<string | null>(null)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
+  const [activeCheckout, setActiveCheckout] = useState<{ checkout: PlatformProductCheckout; productName: string } | null>(null)
   const [payType, setPayType] = useState<PlatformPaymentType>('wxpay')
   const [rechargeAmount, setRechargeAmount] = useState('20')
   const [recharging, setRecharging] = useState(false)
@@ -93,7 +95,13 @@ export default function BillingModal(props: BillingModalProps) {
     setCheckoutError(null)
     try {
       const checkout = await createPlatformProductCheckout(productId, payType)
-      window.location.assign(checkout.checkout_url)
+      if (checkout.payment_display === 'redirect' && checkout.checkout_url) {
+        window.location.assign(checkout.checkout_url)
+        return
+      }
+      const product = products.find((item) => item.id === productId)
+      setActiveCheckout({ checkout, productName: product?.name || '生图次数包' })
+      setCheckoutProductId(null)
     } catch (err) {
       setCheckoutError(err instanceof Error ? err.message : String(err))
       setCheckoutProductId(null)
@@ -106,7 +114,12 @@ export default function BillingModal(props: BillingModalProps) {
     setCheckoutError(null)
     try {
       const checkout = await createPlatformBalanceCheckout(rechargeAmount.trim(), payType)
-      window.location.assign(checkout.checkout_url)
+      if (checkout.payment_display === 'redirect' && checkout.checkout_url) {
+        window.location.assign(checkout.checkout_url)
+        return
+      }
+      setActiveCheckout({ checkout, productName: '对话余额充值' })
+      setRecharging(false)
     } catch (err) {
       setCheckoutError(err instanceof Error ? err.message : String(err))
       setRecharging(false)
@@ -136,6 +149,17 @@ export default function BillingModal(props: BillingModalProps) {
     }
   }
 
+  const handlePaymentPaid = async () => {
+    await refreshSession().catch(() => undefined)
+    await loadBilling().then(setBilling).catch(() => undefined)
+  }
+
+  const closePayment = () => {
+    setActiveCheckout(null)
+    setCheckoutProductId(null)
+    setRecharging(false)
+  }
+
   const renderProductRow = (product: PlatformProduct) => {
     const isMembership = product.kind === 'membership'
     const spec = isMembership ? `${product.duration_days} 天不限次生成` : `${product.credits} 次生成额度`
@@ -154,7 +178,7 @@ export default function BillingModal(props: BillingModalProps) {
         </div>
         {paymentEnabled ? (
           <button type="button" onClick={() => void handlePurchase(product.id)} disabled={checkoutProductId !== null || recharging} className="inline-flex h-9 shrink-0 items-center justify-center gap-1 rounded-[11px] bg-[linear-gradient(150deg,var(--accent),#0891b2)] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition hover:-translate-y-px active:scale-[0.99] disabled:opacity-50 disabled:hover:translate-y-0">
-            {checkoutProductId === product.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <>{buyLabel}<ExternalLink className="h-3.5 w-3.5" /></>}
+            {checkoutProductId === product.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <>{buyLabel}<ScanLine className="h-3.5 w-3.5" /></>}
           </button>
         ) : (
           <button type="button" disabled className="h-9 shrink-0 rounded-[11px] border border-line bg-surface2 px-4 text-sm font-medium text-ink-3">未开放</button>
@@ -251,7 +275,7 @@ export default function BillingModal(props: BillingModalProps) {
                   <input type="number" min={rechargeMin} max={rechargeMax} step="0.01" inputMode="decimal" aria-label="充值金额" value={rechargeAmount} onChange={(event) => { setRechargeAmount(event.target.value); setCheckoutError(null) }} onKeyDown={(event) => { if (event.key === 'Enter') void handleRecharge() }} className="min-w-0 flex-1 bg-transparent font-mono text-sm text-ink outline-none" />
                 </label>
                 <button type="button" onClick={() => void handleRecharge()} disabled={!rechargeValid || recharging || checkoutProductId !== null} className="inline-flex h-10 items-center justify-center gap-2 rounded-[11px] bg-[linear-gradient(150deg,var(--accent),#0891b2)] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition hover:-translate-y-px active:scale-[0.99] disabled:opacity-50 disabled:hover:translate-y-0">
-                  {recharging ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <>前往支付<ExternalLink className="h-4 w-4" /></>}
+                  {recharging ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <>扫码支付<ScanLine className="h-4 w-4" /></>}
                 </button>
               </div>
             ) : (
@@ -303,6 +327,7 @@ export default function BillingModal(props: BillingModalProps) {
           </div>
         </div>
       </section>
+      {activeCheckout && <PaymentQrModal checkout={activeCheckout.checkout} productName={activeCheckout.productName} onClose={closePayment} onPaid={handlePaymentPaid} />}
     </div>
   )
 }

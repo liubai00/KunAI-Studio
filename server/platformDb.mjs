@@ -92,6 +92,7 @@ function mapCheckoutIntent(row) {
     paymentEventId: row.payment_event_id ?? null,
     paymentProvider: row.payment_provider ?? null,
     paymentExternalId: row.payment_external_id ?? null,
+    paymentType: row.payment_type ?? null,
     createdAt: row.created_at,
     paidAt: row.paid_at ?? null,
   }
@@ -108,6 +109,7 @@ function mapBalanceCheckoutIntent(row) {
     paymentEventId: row.payment_event_id ?? null,
     paymentProvider: row.payment_provider ?? null,
     paymentExternalId: row.payment_external_id ?? null,
+    paymentType: row.payment_type ?? null,
     createdAt: row.created_at,
     paidAt: row.paid_at ?? null,
   }
@@ -238,6 +240,10 @@ function mapRedemptionCode(row) {
     expiresAt: row.expires_at ?? null,
     redeemedBy: row.redeemed_by ?? null,
     redeemedAt: row.redeemed_at ?? null,
+    enabled: Boolean(row.enabled),
+    maxRedemptions: row.max_redemptions ?? 1,
+    redemptionCount: row.redemption_count ?? (row.redeemed_by ? 1 : 0),
+    createdBy: row.created_by ?? null,
     createdAt: row.created_at,
   }
 }
@@ -404,6 +410,7 @@ export class PlatformDatabase {
         payment_event_id INTEGER UNIQUE REFERENCES payment_events(id) ON DELETE SET NULL,
         payment_provider TEXT,
         payment_external_id TEXT,
+        payment_type TEXT,
         created_at INTEGER NOT NULL,
         paid_at INTEGER
       );
@@ -421,6 +428,7 @@ export class PlatformDatabase {
         payment_event_id INTEGER UNIQUE REFERENCES payment_events(id) ON DELETE SET NULL,
         payment_provider TEXT,
         payment_external_id TEXT,
+        payment_type TEXT,
         created_at INTEGER NOT NULL,
         paid_at INTEGER
       );
@@ -436,12 +444,27 @@ export class PlatformDatabase {
         balance_micros INTEGER NOT NULL DEFAULT 0 CHECK (balance_micros >= 0),
         note TEXT NOT NULL DEFAULT '',
         expires_at INTEGER,
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        max_redemptions INTEGER NOT NULL DEFAULT 1 CHECK (max_redemptions > 0),
+        redemption_count INTEGER NOT NULL DEFAULT 0 CHECK (redemption_count >= 0),
         redeemed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
         redeemed_at INTEGER,
         created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS redemption_codes_created_idx ON redemption_codes(created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS redemption_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL REFERENCES redemption_codes(code),
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        credits INTEGER NOT NULL DEFAULT 0 CHECK (credits >= 0),
+        membership_days INTEGER NOT NULL DEFAULT 0 CHECK (membership_days >= 0),
+        balance_micros INTEGER NOT NULL DEFAULT 0 CHECK (balance_micros >= 0),
+        redeemed_at INTEGER NOT NULL,
+        UNIQUE(code, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS redemption_records_code_created_idx ON redemption_records(code, redeemed_at DESC);
 
       CREATE TABLE IF NOT EXISTS platform_metadata (
         key TEXT PRIMARY KEY,
@@ -558,6 +581,21 @@ export class PlatformDatabase {
     if (!agentCallColumns.has('result_status')) this.db.exec('ALTER TABLE agent_calls ADD COLUMN result_status INTEGER')
     if (!agentCallColumns.has('result_content_type')) this.db.exec('ALTER TABLE agent_calls ADD COLUMN result_content_type TEXT')
     if (!agentCallColumns.has('result_body')) this.db.exec('ALTER TABLE agent_calls ADD COLUMN result_body BLOB')
+    const redemptionColumns = new Set(this.db.prepare('PRAGMA table_info(redemption_codes)').all().map((column) => column.name))
+    if (!redemptionColumns.has('enabled')) this.db.exec('ALTER TABLE redemption_codes ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1')
+    if (!redemptionColumns.has('max_redemptions')) this.db.exec('ALTER TABLE redemption_codes ADD COLUMN max_redemptions INTEGER NOT NULL DEFAULT 1')
+    if (!redemptionColumns.has('redemption_count')) this.db.exec('ALTER TABLE redemption_codes ADD COLUMN redemption_count INTEGER NOT NULL DEFAULT 0')
+    this.db.exec(`
+      INSERT OR IGNORE INTO redemption_records (code, user_id, credits, membership_days, balance_micros, redeemed_at)
+      SELECT code, redeemed_by, credits, membership_days, balance_micros, redeemed_at
+      FROM redemption_codes
+      WHERE redeemed_by IS NOT NULL AND redeemed_at IS NOT NULL
+    `)
+    this.db.exec('UPDATE redemption_codes SET redemption_count = 1 WHERE redeemed_by IS NOT NULL AND redemption_count = 0')
+    const productCheckoutColumns = new Set(this.db.prepare('PRAGMA table_info(product_checkout_intents)').all().map((column) => column.name))
+    if (!productCheckoutColumns.has('payment_type')) this.db.exec('ALTER TABLE product_checkout_intents ADD COLUMN payment_type TEXT')
+    const balanceCheckoutColumns = new Set(this.db.prepare('PRAGMA table_info(balance_checkout_intents)').all().map((column) => column.name))
+    if (!balanceCheckoutColumns.has('payment_type')) this.db.exec('ALTER TABLE balance_checkout_intents ADD COLUMN payment_type TEXT')
     this.migrateUsdToCny()
     this.db.prepare('UPDATE products SET active = 0, updated_at = ? WHERE active = 1 AND price_micros <= 0').run(this.now())
   }
@@ -1618,6 +1656,19 @@ export class PlatformDatabase {
     return run()
   }
 
+  recordCheckoutPayment(id, { provider, externalId, paymentType }) {
+    const found = this.getCheckoutIntent(id) || this.getBalanceCheckoutIntent(id)
+    if (!found) throw createError('支付结算意向不存在', 404, 'CHECKOUT_INTENT_NOT_FOUND')
+    if (found.status !== 'pending') throw createError('支付结算意向状态无效', 409, 'CHECKOUT_INTENT_CONFLICT')
+    const table = found.productId ? 'product_checkout_intents' : 'balance_checkout_intents'
+    this.db.prepare(`
+      UPDATE ${table}
+      SET payment_provider = ?, payment_external_id = ?, payment_type = ?
+      WHERE id = ? AND status = 'pending'
+    `).run(String(provider), String(externalId).slice(0, 128), String(paymentType).slice(0, 32), found.id)
+    return found.productId ? this.getCheckoutIntent(found.id) : this.getBalanceCheckoutIntent(found.id)
+  }
+
   creditPayment({ provider, externalId, email, userId, amountMicros, productId, checkoutIntentId, balanceCheckoutIntentId, payloadHash }) {
     const now = this.now()
     const run = this.db.transaction(() => {
@@ -1845,13 +1896,17 @@ export class PlatformDatabase {
     const count = options.count == null || options.count === '' ? 1 : Math.trunc(Number(options.count))
     const note = String(options.note || '').slice(0, 200)
     const expiresAt = options.expiresAt ? Number(options.expiresAt) : null
+    const maxRedemptions = options.maxRedemptions == null || options.maxRedemptions === '' ? 1 : Math.trunc(Number(options.maxRedemptions))
+    const enabled = options.enabled === undefined ? true : Boolean(options.enabled)
     if (credits < 0 || membershipDays < 0 || balanceMicros < 0) throw createError('数值不能为负', 400, 'INVALID_VALUE')
     if (credits === 0 && membershipDays === 0 && balanceMicros === 0) throw createError('兑换码至少要包含次数、会员天数或余额之一', 400, 'EMPTY_REDEMPTION')
     if (!Number.isSafeInteger(count) || count < 1 || count > 1000) throw createError('生成数量需在 1–1000 之间', 400, 'INVALID_COUNT')
+    if (!Number.isSafeInteger(maxRedemptions) || maxRedemptions < 1 || maxRedemptions > 100000) throw createError('每个兑换码可使用次数需在 1–100000 之间', 400, 'INVALID_MAX_REDEMPTIONS')
+    if (expiresAt !== null && !Number.isSafeInteger(expiresAt)) throw createError('兑换码有效期无效', 400, 'INVALID_EXPIRY')
     const now = this.now()
     const insert = this.db.prepare(`
-      INSERT INTO redemption_codes (code, credits, membership_days, balance_micros, note, expires_at, created_by, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO redemption_codes (code, credits, membership_days, balance_micros, note, expires_at, created_by, created_at, enabled, max_redemptions, redemption_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
     `)
     const run = this.db.transaction(() => {
       const codes = []
@@ -1860,7 +1915,7 @@ export class PlatformDatabase {
         for (let attempt = 0; attempt < 8 && !inserted; attempt += 1) {
           const code = generateRedemptionCode()
           try {
-            insert.run(code, credits, membershipDays, balanceMicros, note, expiresAt, actorUserId, now)
+            insert.run(code, credits, membershipDays, balanceMicros, note, expiresAt, actorUserId, now, enabled ? 1 : 0, maxRedemptions)
             codes.push(code)
             inserted = true
           } catch (err) {
@@ -1872,7 +1927,7 @@ export class PlatformDatabase {
       this.db.prepare(`
         INSERT INTO audit_logs (actor_user_id, action, details, created_at)
         VALUES (?, 'redemption_codes_created', ?, ?)
-      `).run(actorUserId, JSON.stringify({ count, credits, membershipDays, balanceMicros }), now)
+      `).run(actorUserId, JSON.stringify({ count, credits, membershipDays, balanceMicros, maxRedemptions, enabled }), now)
       return codes
     })
     return run()
@@ -1885,44 +1940,90 @@ export class PlatformDatabase {
     const run = this.db.transaction(() => {
       const row = this.db.prepare('SELECT * FROM redemption_codes WHERE code = ?').get(canonical)
       if (!row) throw createError('兑换码不存在', 404, 'CODE_NOT_FOUND')
-      if (row.redeemed_by) throw createError('该兑换码已被使用', 409, 'CODE_ALREADY_USED')
+      if (!row.enabled) throw createError('该兑换码已停用', 409, 'CODE_DISABLED')
       if (row.expires_at && row.expires_at <= now) throw createError('兑换码已过期', 400, 'CODE_EXPIRED')
       const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(userId)
       if (!user || Number(user.status) !== 1) throw createError('账户已停用或不存在', 403, 'ACCOUNT_DISABLED')
+      if (row.redeemed_by === userId || this.db.prepare('SELECT 1 FROM redemption_records WHERE code = ? AND user_id = ?').get(canonical, userId)) {
+        throw createError('该兑换码已被使用，当前账户不能重复兑换', 409, 'CODE_ALREADY_REDEEMED')
+      }
+      if (row.redemption_count >= row.max_redemptions) throw createError('该兑换码已达到使用次数上限', 409, 'CODE_EXHAUSTED')
+
+      const claimed = this.db.prepare(`
+        UPDATE redemption_codes
+        SET redemption_count = redemption_count + 1,
+            redeemed_by = COALESCE(redeemed_by, ?),
+            redeemed_at = COALESCE(redeemed_at, ?)
+        WHERE code = ? AND enabled = 1 AND redemption_count < max_redemptions
+      `).run(userId, now, canonical)
+      if (claimed.changes !== 1) throw createError('兑换码已达到使用次数上限', 409, 'CODE_EXHAUSTED')
+      this.db.prepare(`
+        INSERT INTO redemption_records (code, user_id, credits, membership_days, balance_micros, redeemed_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(canonical, userId, row.credits, row.membership_days, row.balance_micros, now)
 
       const granted = {}
       if (row.credits > 0) {
         this.applyCredits(userId, row.credits, now)
-        this.insertLedger(userId, 'redeem_credits', 0, user.balance_micros, `redeem:${canonical}:credits`, `兑换 ${row.credits} 次生成额度`, now)
+        this.insertLedger(userId, 'redeem_credits', 0, user.balance_micros, `redeem:${canonical}:${userId}:credits`, `兑换 ${row.credits} 次生成额度`, now)
         granted.credits = row.credits
       }
       if (row.membership_days > 0) {
         granted.membershipExpiresAt = this.applyMembershipDays(userId, row.membership_days, now)
-        this.insertLedger(userId, 'redeem_membership', 0, user.balance_micros, `redeem:${canonical}:membership`, `兑换会员 ${row.membership_days} 天`, now)
+        this.insertLedger(userId, 'redeem_membership', 0, user.balance_micros, `redeem:${canonical}:${userId}:membership`, `兑换会员 ${row.membership_days} 天`, now)
         granted.membershipDays = row.membership_days
       }
       if (row.balance_micros > 0) {
         const balanceAfter = user.balance_micros + row.balance_micros
         this.db.prepare('UPDATE users SET balance_micros = ?, updated_at = ? WHERE id = ?').run(balanceAfter, now, userId)
-        this.insertLedger(userId, 'redeem_balance', row.balance_micros, balanceAfter, `redeem:${canonical}:balance`, '兑换余额', now)
+        this.insertLedger(userId, 'redeem_balance', row.balance_micros, balanceAfter, `redeem:${canonical}:${userId}:balance`, '兑换余额', now)
         granted.balanceMicros = row.balance_micros
       }
-      this.db.prepare('UPDATE redemption_codes SET redeemed_by = ?, redeemed_at = ? WHERE code = ?').run(userId, now, canonical)
       this.db.prepare(`
         INSERT INTO audit_logs (actor_user_id, target_user_id, action, details, created_at)
         VALUES (?, ?, 'redemption_redeemed', ?, ?)
       `).run(userId, userId, JSON.stringify({ code: canonical, granted }), now)
       return { user: this.getUserById(userId), granted }
     })
-    return run()
+    return run.immediate()
   }
 
   listRedemptionCodes(options = {}) {
     const limit = Math.max(1, Math.min(500, Number(options.limit) || 100))
-    const rows = options.unusedOnly
-      ? this.db.prepare('SELECT * FROM redemption_codes WHERE redeemed_by IS NULL ORDER BY created_at DESC LIMIT ?').all(limit)
-      : this.db.prepare('SELECT * FROM redemption_codes ORDER BY created_at DESC LIMIT ?').all(limit)
+    const search = String(options.search || '').trim().toUpperCase().slice(0, 100)
+    const status = String(options.status || (options.unusedOnly ? 'available' : 'all'))
+    const clauses = []
+    const params = []
+    if (search) {
+      clauses.push('(code LIKE ? OR note LIKE ?)')
+      params.push(`%${search}%`, `%${search}%`)
+    }
+    if (status === 'available') {
+      clauses.push('enabled = 1 AND redemption_count < max_redemptions AND (expires_at IS NULL OR expires_at > ?)')
+      params.push(this.now())
+    }
+    if (status === 'disabled') clauses.push('enabled = 0')
+    if (status === 'exhausted') clauses.push('redemption_count >= max_redemptions')
+    if (status === 'expired') {
+      clauses.push('expires_at IS NOT NULL AND expires_at <= ?')
+      params.push(this.now())
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+    const rows = this.db.prepare(`SELECT * FROM redemption_codes ${where} ORDER BY created_at DESC LIMIT ?`).all(...params, limit)
     return rows.map(mapRedemptionCode)
+  }
+
+  setRedemptionCodeEnabled(actorUserId, code, enabled) {
+    const canonical = canonicalizeRedemptionCode(code)
+    if (!canonical) throw createError('兑换码格式无效', 400, 'INVALID_CODE_FORMAT')
+    const now = this.now()
+    const result = this.db.prepare('UPDATE redemption_codes SET enabled = ? WHERE code = ?').run(enabled ? 1 : 0, canonical)
+    if (result.changes !== 1) throw createError('兑换码不存在', 404, 'CODE_NOT_FOUND')
+    this.db.prepare(`
+      INSERT INTO audit_logs (actor_user_id, action, details, created_at)
+      VALUES (?, 'redemption_code_status_changed', ?, ?)
+    `).run(actorUserId, JSON.stringify({ code: canonical, enabled: Boolean(enabled) }), now)
+    return mapRedemptionCode(this.db.prepare('SELECT * FROM redemption_codes WHERE code = ?').get(canonical))
   }
 
   listUsers(search = '', limit = 100) {

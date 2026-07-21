@@ -166,6 +166,11 @@ export interface RedemptionCode {
   expires_at: number | null
   redeemed_by: number | null
   redeemed_at: number | null
+  enabled: boolean
+  max_redemptions: number
+  redemption_count: number
+  remaining_redemptions: number
+  created_by: number | null
   created_at: number
 }
 
@@ -176,6 +181,8 @@ export interface RedemptionInput {
   count: number
   note?: string
   expires_at?: number | null
+  max_redemptions?: number
+  enabled?: boolean
 }
 
 export interface RedeemResult extends PlatformUser {
@@ -225,8 +232,9 @@ interface PlatformState {
   refreshAgentModels: () => Promise<PlatformAgentModel[]>
   saveAgentModel: (id: string, changes: AgentModelInput) => Promise<PlatformAgentModel>
   redeemCode: (code: string) => Promise<RedeemResult>
-  listRedemptionCodes: (unusedOnly?: boolean) => Promise<RedemptionCode[]>
+  listRedemptionCodes: (options?: { search?: string; status?: string }) => Promise<RedemptionCode[]>
   createRedemptionCodes: (input: RedemptionInput) => Promise<{ codes: string[] }>
+  setRedemptionCodeEnabled: (code: string, enabled: boolean) => Promise<RedemptionCode>
   logout: () => Promise<void>
 }
 
@@ -431,10 +439,20 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
     method: 'POST',
     body: JSON.stringify({ code }),
   }),
-  listRedemptionCodes: (unusedOnly) => request(`/api/platform/admin/redemption-codes${unusedOnly ? '?unused=1' : ''}`),
+  listRedemptionCodes: (options) => {
+    const params = new URLSearchParams()
+    if (options?.search) params.set('search', options.search)
+    if (options?.status && options.status !== 'all') params.set('status', options.status)
+    const query = params.size ? `?${params}` : ''
+    return request(`/api/platform/admin/redemption-codes${query}`)
+  },
   createRedemptionCodes: (input) => request('/api/platform/admin/redemption-codes', {
     method: 'POST',
     body: JSON.stringify(input),
+  }),
+  setRedemptionCodeEnabled: (code, enabled) => request(`/api/platform/admin/redemption-codes/${encodeURIComponent(code)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
   }),
   logout: async () => {
     try {

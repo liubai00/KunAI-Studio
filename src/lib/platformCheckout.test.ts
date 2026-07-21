@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { createPlatformBalanceCheckout, createPlatformProductCheckout, recheckPlatformPayment } from './platformCheckout'
 
 describe('createPlatformProductCheckout', () => {
-  it('creates a server-side checkout intent before returning the payment URL', async () => {
+  it('creates a server-side checkout intent before returning the QR content', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({
       success: true,
       data: {
         checkout_intent_id: 'intent-123',
-        checkout_url: 'https://pay.test/checkout?checkout_intent_id=intent-123',
+        checkout_url: null,
+        payment_display: 'qrcode',
+        qr_content: 'alipays://platformapi/startapp?order=123',
         product_id: 'credits-100',
         user_id: 42,
         amount: 36,
@@ -20,6 +22,7 @@ describe('createPlatformProductCheckout', () => {
     const result = await createPlatformProductCheckout('credits-100', 'alipay', fetcher)
 
     expect(result.checkout_intent_id).toBe('intent-123')
+    expect(result.qr_content).toContain('alipays://')
     expect(fetcher).toHaveBeenCalledWith('/api/platform/payment/checkout', expect.objectContaining({
       method: 'POST',
       credentials: 'include',
@@ -46,6 +49,7 @@ describe('createPlatformProductCheckout', () => {
         data: {
           checkout_intent_id: 'bal_intent-123',
           checkout_url: 'https://pay.test/order/1',
+          payment_display: 'redirect',
           kind: 'balance',
           user_id: 42,
           amount: 20,
@@ -62,5 +66,14 @@ describe('createPlatformProductCheckout', () => {
       body: JSON.stringify({ amount: '20.00', pay_type: 'wxpay' }),
     }))
     await expect(recheckPlatformPayment(checkout.checkout_intent_id, fetcher as typeof fetch)).resolves.toEqual({ paid: true })
+  })
+
+  it('rejects a QR checkout without usable QR content', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      data: { checkout_intent_id: 'intent-empty', payment_display: 'qrcode', qr_content: '' },
+    }), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+
+    await expect(createPlatformProductCheckout('credits-100', 'wxpay', fetcher)).rejects.toThrow('暂时无法发起购买')
   })
 })

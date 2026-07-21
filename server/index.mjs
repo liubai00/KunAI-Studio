@@ -113,7 +113,7 @@ function loadConfig(env) {
       platformPublicKey: String(env.DULUPAY_PLATFORM_PUBLIC_KEY || '').trim(),
       notifyUrl: String(env.DULUPAY_NOTIFY_URL || '').trim(),
       returnUrl: String(env.DULUPAY_RETURN_URL || '').trim(),
-      method: 'jump',
+      method: String(env.DULUPAY_METHOD || 'qrcode').trim(),
       timeoutMs: Number(env.DULUPAY_TIMEOUT_MS || 10000),
       timestampSkewSeconds: Number(env.DULUPAY_TIMESTAMP_SKEW_SECONDS || 300),
     },
@@ -222,6 +222,11 @@ function serializeRedemptionCode(code) {
     expires_at: code.expiresAt,
     redeemed_by: code.redeemedBy,
     redeemed_at: code.redeemedAt,
+    enabled: code.enabled,
+    max_redemptions: code.maxRedemptions,
+    redemption_count: code.redemptionCount,
+    remaining_redemptions: Math.max(0, code.maxRedemptions - code.redemptionCount),
+    created_by: code.createdBy,
     created_at: code.createdAt,
   }
 }
@@ -610,6 +615,9 @@ export function createPlatformApp(options = {}) {
     if (!payment.paid) return { paid: false }
     const found = getPaymentIntent(payment.outTradeNo)
     if (!found) throw createHttpError('支付结算意向不存在', 404, 'CHECKOUT_INTENT_NOT_FOUND')
+    if (found.intent.paymentProvider && found.intent.paymentProvider !== 'dulupay') throw createHttpError('支付渠道与结算意向不一致', 409, 'PAYMENT_PROVIDER_MISMATCH')
+    if (found.intent.paymentExternalId && found.intent.paymentExternalId !== payment.tradeNo) throw createHttpError('支付订单号与结算意向不一致', 409, 'PAYMENT_TRADE_MISMATCH')
+    if (payment.payType && found.intent.paymentType && payment.payType !== found.intent.paymentType) throw createHttpError('支付方式与结算意向不一致', 409, 'PAYMENT_TYPE_MISMATCH')
     const payloadHash = createHash('sha256').update(JSON.stringify({
       provider: 'dulupay',
       tradeNo: payment.tradeNo,
@@ -734,12 +742,15 @@ export function createPlatformApp(options = {}) {
         clientIp: gateway.getClientIp(req),
         payType,
       }) : null
-      const checkoutUrl = order?.payUrl || (productId ? buildCheckoutUrl(config.paymentUrl, intent) : buildBalanceCheckoutUrl(config.paymentUrl, intent))
+      if (dulupay) db.recordCheckoutPayment(intent.id, { provider: 'dulupay', externalId: order.tradeNo, paymentType: payType })
+      const checkoutUrl = order?.payUrl || (!dulupay ? (productId ? buildCheckoutUrl(config.paymentUrl, intent) : buildBalanceCheckoutUrl(config.paymentUrl, intent)) : null)
       sendJson(res, 201, {
         success: true,
         data: {
           checkout_intent_id: intent.id,
           checkout_url: checkoutUrl,
+          payment_display: dulupay ? order.presentation : 'redirect',
+          qr_content: dulupay ? order.qrContent : null,
           kind: productId ? 'credits' : 'balance',
           product_id: productId ? intent.productId : null,
           user_id: intent.userId,
@@ -764,12 +775,16 @@ export function createPlatformApp(options = {}) {
       if (!found) throw createHttpError('支付结算意向不存在', 404, 'CHECKOUT_INTENT_NOT_FOUND')
       if (found.intent.userId !== session.user.id) throw createHttpError('支付结算意向不属于当前账户', 403, 'CHECKOUT_INTENT_FORBIDDEN')
       if (found.intent.status === 'paid') {
-        sendJson(res, 200, { success: true, data: { paid: true, duplicate: true, kind: found.kind } })
+        sendJson(res, 200, { success: true, data: { paid: true, duplicate: true, kind: found.kind, status: 'paid' } })
+        return
+      }
+      if (found.intent.expiresAt <= Date.now()) {
+        sendJson(res, 200, { success: true, data: { paid: false, kind: found.kind, status: 'expired' } })
         return
       }
       const payment = await dulupay.queryOrder(intentId)
       const result = payment.paid ? settleDulupayPayment(payment) : null
-      sendJson(res, 200, { success: true, data: { paid: payment.paid, kind: found.kind, ...(result || {}) } })
+      sendJson(res, 200, { success: true, data: { paid: payment.paid, kind: found.kind, status: payment.paid ? 'paid' : 'pending', ...(result || {}) } })
       return
     }
     if (pathname === '/api/platform/tools/search-web' && req.method === 'POST') {
@@ -1048,7 +1063,12 @@ export function createPlatformApp(options = {}) {
       const session = requireSession(req)
       if (!isAdmin(session.user)) throw createHttpError('需要管理员权限', 403, 'ADMIN_REQUIRED')
       const unusedOnly = url.searchParams.get('unused') === '1'
-      sendJson(res, 200, { success: true, data: db.listRedemptionCodes({ limit: url.searchParams.get('limit'), unusedOnly }).map(serializeRedemptionCode) })
+      sendJson(res, 200, { success: true, data: db.listRedemptionCodes({
+        limit: url.searchParams.get('limit'),
+        unusedOnly,
+        search: url.searchParams.get('search'),
+        status: url.searchParams.get('status'),
+      }).map(serializeRedemptionCode) })
       return
     }
     if (pathname === '/api/platform/admin/redemption-codes' && req.method === 'POST') {
@@ -1062,8 +1082,20 @@ export function createPlatformApp(options = {}) {
         count: body.count,
         note: body.note,
         expiresAt: body.expires_at,
+        maxRedemptions: body.max_redemptions,
+        enabled: body.enabled,
       })
       sendJson(res, 200, { success: true, data: { codes } })
+      return
+    }
+    const adminRedemptionMatch = pathname.match(/^\/api\/platform\/admin\/redemption-codes\/([^/]+)$/)
+    if (adminRedemptionMatch && req.method === 'PATCH') {
+      const session = requireSession(req, true)
+      if (!isAdmin(session.user)) throw createHttpError('需要管理员权限', 403, 'ADMIN_REQUIRED')
+      const body = await readJsonBody(req)
+      if (typeof body.enabled !== 'boolean') throw createHttpError('兑换码状态无效', 400, 'INVALID_REDEMPTION_STATUS')
+      const code = db.setRedemptionCodeEnabled(session.user.id, decodeURIComponent(adminRedemptionMatch[1]), body.enabled)
+      sendJson(res, 200, { success: true, data: serializeRedemptionCode(code) })
       return
     }
     throw createHttpError('Not Found', 404, 'NOT_FOUND')

@@ -438,6 +438,7 @@ test('QA regression: product/redemption/access hardening', () => {
 
   // charset excludes ambiguous 0 O 1 I L
   const codes = db.createRedemptionCodes(admin.id, { credits: 1, count: 300 })
+  assert.equal(new Set(codes).size, codes.length)
   const chars = new Set(codes.join('').replace(/-/g, '').split(''))
   for (const c of ['0', 'O', '1', 'I', 'L']) assert.equal(chars.has(c), false, `charset must exclude ${c}`)
 
@@ -464,6 +465,31 @@ test('QA regression: product/redemption/access hardening', () => {
   db.updateUserAccess(admin.id, admin.id, { role: 10, status: 1, group: 'admin' })
   assert.equal(db.getUserById(admin.id).authVersion, authVersionBefore)
   assert.ok(db.getSession(session.token))
+  db.close()
+})
+
+test('redemption codes support bounded multi-use, per-user idempotency and disable controls', () => {
+  const db = new PlatformDatabase({ path: ':memory:' })
+  const admin = createUser(db, 'admin-multi-redeem@example.com', 0, 10)
+  const first = createUser(db, 'first-redeemer@example.com', 0)
+  const second = createUser(db, 'second-redeemer@example.com', 0)
+  const third = createUser(db, 'third-redeemer@example.com', 0)
+  const [code] = db.createRedemptionCodes(admin.id, { credits: 5, balanceMicros: 2000000, maxRedemptions: 2, count: 1, note: 'shared' })
+
+  assert.equal(db.redeemCode(first.id, code).granted.credits, 5)
+  assert.throws(() => db.redeemCode(first.id, code), (err) => err.code === 'CODE_ALREADY_REDEEMED')
+  assert.equal(db.redeemCode(second.id, code).granted.balanceMicros, 2000000)
+  assert.throws(() => db.redeemCode(third.id, code), (err) => err.code === 'CODE_EXHAUSTED')
+  let saved = db.listRedemptionCodes({ search: code }).at(0)
+  assert.equal(saved.redemptionCount, 2)
+  assert.equal(saved.maxRedemptions, 2)
+  assert.equal(db.listRedemptionCodes({ status: 'exhausted' }).length, 1)
+
+  saved = db.setRedemptionCodeEnabled(admin.id, code, false)
+  assert.equal(saved.enabled, false)
+  assert.equal(db.listRedemptionCodes({ status: 'disabled' }).length, 1)
+  assert.equal(db.db.prepare('SELECT COUNT(*) AS count FROM redemption_records WHERE code = ?').get(code).count, 2)
+  assert.equal(db.db.prepare("SELECT COUNT(*) AS count FROM ledger_entries WHERE reference LIKE ?").get(`redeem:${code}:%`).count, 4)
   db.close()
 })
 

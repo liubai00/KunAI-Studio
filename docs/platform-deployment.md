@@ -180,6 +180,7 @@ DULUPAY_MERCHANT_PRIVATE_KEY=<PKCS#8 商户私钥>
 DULUPAY_PLATFORM_PUBLIC_KEY=<X.509 平台公钥>
 DULUPAY_NOTIFY_URL=https://image.kunai.one/api/platform/payment/dulupay/notify
 DULUPAY_RETURN_URL=https://image.kunai.one/
+DULUPAY_METHOD=qrcode
 PLATFORM_RECHARGE_MIN_CNY=1
 PLATFORM_RECHARGE_MAX_CNY=5000
 ```
@@ -206,7 +207,9 @@ X-CSRF-Token: <当前 Session 的 CSRF token>
 {"amount":"20.00","pay_type":"alipay"}
 ```
 
-`pay_type` 只允许 `wxpay` 或 `alipay`。服务端先创建 30 分钟有效的随机结算意向：次数包会快照用户、商品、名称、精确人民币价格和次数；余额充值会快照用户与充值金额。随后服务端以该不可猜测的意向 ID 作为 Dulupay `out_trade_no`，签名调用 `POST https://api.dulupay.com/api/pay/create`，并使用 `method=jump` 获取 HTTPS 收银台地址。前端只能拿到验证后的支付跳转 URL，拿不到商户私钥、签名原文或用户邮箱。
+`pay_type` 只允许 `wxpay` 或 `alipay`。服务端先创建 30 分钟有效的随机结算意向：次数包会快照用户、商品、名称、精确人民币价格和次数；余额充值会快照用户与充值金额。随后服务端以该不可猜测的意向 ID 作为 Dulupay `out_trade_no`，签名调用 `POST https://api.dulupay.com/api/pay/create`，并默认使用 `method=qrcode`。验签后的 `pay_type=qrcode/scan` 响应会把 `pay_info` 作为二维码内容；若商户后台只返回 `pay_type=jump/h5`，则校验 HTTPS 收银台地址并将该地址生成二维码。前端只拿到二维码展示内容与本地结算意向，拿不到商户私钥、签名原文或用户邮箱。
+
+用户在站内支付弹窗扫码，弹窗每 2.5 秒调用一次主动查单，页面隐藏、弹窗关闭、订单过期或支付完成后停止查询。Dulupay 平台订单号、本站订单号、支付渠道、金额、商品快照和状态保存在服务端；浏览器不能把订单直接改成已支付。
 
 Dulupay 支付成功后 GET：
 
@@ -225,6 +228,12 @@ GET /api/platform/payment/dulupay/notify?...&trade_status=TRADE_SUCCESS&sign_typ
 `provider + trade_no` 在数据库中唯一，相同订单重复通知不会重复到账；同一个结算意向也不能换一个平台订单号再次入账。浏览器从 Dulupay 返回本站后，会使用结算意向调用 `POST /api/platform/payment/recheck` 主动查询 `POST https://api.dulupay.com/api/pay/query`，只接受经过平台公钥验签且 PID、订单号、金额均匹配的已支付结果。因此异步通知短暂延迟时仍可安全补单，浏览器回跳参数本身不会直接触发入账。
 
 `PAYMENT_URL` 与 `PAYMENT_WEBHOOK_SECRET` 仅用于兼容旧的自建支付页；使用 Dulupay 时应保持为空，避免两个支付通道同时开放。
+
+## 兑换码
+
+兑换码由管理员在「管理中心 → 兑换码」创建，可组合发放生图次数、人民币余额和历史会员兼容权益，并配置批量数量、每码可使用次数、有效期和启停状态。只有 `role >= 10` 的账户可以调用管理接口，普通用户只能在「账户与账单」兑换。
+
+`redemption_records` 以兑换码和用户建立唯一记录；兑换时使用 SQLite 立即事务，原子校验启用状态、有效期、总使用次数和当前用户历史，再写入兑换记录、账本与账户权益。同一用户重试不会重复到账，并发请求不能突破兑换码总使用次数。已经产生兑换记录的兑换码只允许停用，不提供物理删除或核心权益修改接口。
 
 ## 生产部署
 

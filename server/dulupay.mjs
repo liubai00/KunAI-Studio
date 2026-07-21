@@ -88,6 +88,28 @@ export function buildDulupayReturnUrl(returnUrl, intentId) {
   return url.toString()
 }
 
+export function normalizeDulupayPaymentInfo(payType, payInfo, production = false) {
+  const type = String(payType || '').trim().toLowerCase()
+  const value = String(payInfo || '').trim()
+  if (!value || value.length > 4096) throw createError('Dulupay 未返回有效支付信息', 502, 'DULUPAY_INVALID_PAY_INFO')
+  if (['qrcode', 'scan'].includes(type)) {
+    return { presentation: 'qrcode', qrContent: value, payUrl: null }
+  }
+  if (['jump', 'h5'].includes(type)) {
+    let url
+    try {
+      url = new URL(value)
+    } catch {
+      throw createError('Dulupay 支付地址无效', 502, 'DULUPAY_INVALID_PAY_URL')
+    }
+    if (!['https:', ...(production ? [] : ['http:'])].includes(url.protocol)) {
+      throw createError('Dulupay 支付地址协议无效', 502, 'DULUPAY_INVALID_PAY_URL')
+    }
+    return { presentation: 'qrcode', qrContent: url.toString(), payUrl: url.toString() }
+  }
+  throw createError('Dulupay 返回了不支持的支付展示类型', 502, 'DULUPAY_PAY_TYPE_UNSUPPORTED')
+}
+
 export class DulupayClient {
   constructor(options) {
     this.apiBase = String(options.apiBase || 'https://api.dulupay.com').replace(/\/+$/, '')
@@ -96,7 +118,7 @@ export class DulupayClient {
     this.platformPublicKey = options.platformPublicKey
     this.notifyUrl = String(options.notifyUrl || '').trim()
     this.returnUrl = String(options.returnUrl || '').trim()
-    this.method = String(options.method || 'jump').trim()
+    this.method = String(options.method || 'qrcode').trim()
     this.timeoutMs = Number(options.timeoutMs || 10000)
     this.timestampSkewSeconds = Number(options.timestampSkewSeconds || 300)
     this.production = Boolean(options.production)
@@ -115,7 +137,7 @@ export class DulupayClient {
     if (this.production && [apiUrl, notifyUrl, returnUrl].some((url) => url.protocol !== 'https:')) {
       throw createError('生产环境 Dulupay 地址必须使用 HTTPS', 500, 'DULUPAY_INSECURE_URL')
     }
-    if (this.method !== 'jump') throw createError('当前仅支持 Dulupay 跳转支付', 500, 'DULUPAY_METHOD_UNSUPPORTED')
+    if (!['qrcode', 'jump'].includes(this.method)) throw createError('Dulupay 支付展示方式无效', 500, 'DULUPAY_METHOD_UNSUPPORTED')
     this.privateKey = parsePrivateKey(this.privateKey)
     this.platformPublicKey = parsePublicKey(this.platformPublicKey)
   }
@@ -185,17 +207,9 @@ export class DulupayClient {
     })
     if (response.code !== '0') throw createError(`Dulupay：${cleanProviderMessage(response.msg, '下单失败')}`, 502, 'DULUPAY_ORDER_FAILED')
     this.verifyResponse(response)
-    if (response.pay_type !== 'jump') throw createError('Dulupay 未返回跳转支付地址', 502, 'DULUPAY_PAY_TYPE_UNSUPPORTED')
-    let payUrl
-    try {
-      payUrl = new URL(response.pay_info)
-    } catch {
-      throw createError('Dulupay 支付地址无效', 502, 'DULUPAY_INVALID_PAY_URL')
-    }
-    if (!['https:', ...(this.production ? [] : ['http:'])].includes(payUrl.protocol)) {
-      throw createError('Dulupay 支付地址协议无效', 502, 'DULUPAY_INVALID_PAY_URL')
-    }
-    return { payUrl: payUrl.toString(), tradeNo: response.trade_no, payType }
+    if (!response.trade_no || response.trade_no.length > 128) throw createError('Dulupay 未返回有效平台订单号', 502, 'DULUPAY_INVALID_RESPONSE')
+    const display = normalizeDulupayPaymentInfo(response.pay_type, response.pay_info, this.production)
+    return { ...display, tradeNo: response.trade_no, payType, providerPayType: response.pay_type }
   }
 
   async queryOrder(outTradeNo) {
@@ -211,6 +225,7 @@ export class DulupayClient {
       tradeNo: String(response.trade_no || '').slice(0, 128),
       outTradeNo: response.out_trade_no,
       amountMicros: parseDulupayMoney(response.money),
+      payType: String(response.type || '').slice(0, 32),
       params: response,
     }
   }
@@ -230,6 +245,7 @@ export class DulupayClient {
       tradeNo: String(params.trade_no).slice(0, 128),
       outTradeNo: String(params.out_trade_no).slice(0, 128),
       amountMicros: parseDulupayMoney(params.money),
+      payType: String(params.type || '').slice(0, 32),
       params,
     }
   }

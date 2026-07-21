@@ -6,6 +6,7 @@ import {
   buildDulupaySignContent,
   DulupayClient,
   formatDulupayMoney,
+  normalizeDulupayPaymentInfo,
   parseDulupayMoney,
   signDulupayParams,
   verifyDulupayParams,
@@ -30,6 +31,17 @@ test('Dulupay RSA content follows ASCII ordering and excludes signature fields',
   assert.equal(parseDulupayMoney('36.00'), 36000000)
   assert.throws(() => formatDulupayMoney(10001), (err) => err.code === 'INVALID_AMOUNT')
   assert.equal(buildDulupayReturnUrl('https://studio.test/?from=pay', 'intent-123'), 'https://studio.test/?from=pay&payment_intent=intent-123')
+  assert.deepEqual(normalizeDulupayPaymentInfo('qrcode', 'weixin://wxpay/bizpayurl?pr=test', true), {
+    presentation: 'qrcode',
+    qrContent: 'weixin://wxpay/bizpayurl?pr=test',
+    payUrl: null,
+  })
+  assert.deepEqual(normalizeDulupayPaymentInfo('jump', 'https://cashier.test/order/1', true), {
+    presentation: 'qrcode',
+    qrContent: 'https://cashier.test/order/1',
+    payUrl: 'https://cashier.test/order/1',
+  })
+  assert.throws(() => normalizeDulupayPaymentInfo('jump', 'javascript:alert(1)', true), (err) => err.code === 'DULUPAY_INVALID_PAY_URL')
 })
 
 test('Dulupay client signs create/query requests and verifies provider responses and callbacks', async () => {
@@ -56,15 +68,15 @@ test('Dulupay client signs create/query requests and verifies provider responses
       response.sign = signDulupayParams(response, platform.privateKey)
       return new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
-    assert.equal(params.method, 'jump')
+    assert.equal(params.method, 'qrcode')
     assert.equal(params.type, 'alipay')
     assert.equal(params.money, '20.00')
     assert.equal(new URL(params.return_url).searchParams.get('payment_intent'), params.out_trade_no)
     const response = {
       code: '0',
       trade_no: 'DULU-2001',
-      pay_type: 'jump',
-      pay_info: 'https://cashier.test/order/2001',
+      pay_type: 'qrcode',
+      pay_info: 'alipays://platformapi/startapp?appId=20000067&url=test',
       timestamp: '1721206072',
       sign_type: 'RSA',
     }
@@ -78,14 +90,16 @@ test('Dulupay client signs create/query requests and verifies provider responses
     platformPublicKey: platform.publicKey,
     notifyUrl: 'https://studio.test/api/platform/payment/dulupay/notify',
     returnUrl: 'https://studio.test/',
-    method: 'jump',
+    method: 'qrcode',
     production: true,
     now: () => now,
     fetch: fetcher,
   })
 
   const order = await client.createOrder({ outTradeNo: 'bal_1234567890123456', amountMicros: 20000000, name: '余额充值', payType: 'alipay', clientIp: '203.0.113.1' })
-  assert.equal(order.payUrl, 'https://cashier.test/order/2001')
+  assert.equal(order.payUrl, null)
+  assert.equal(order.qrContent, 'alipays://platformapi/startapp?appId=20000067&url=test')
+  assert.equal(order.presentation, 'qrcode')
   const query = await client.queryOrder('bal_1234567890123456')
   assert.equal(query.paid, true)
   assert.equal(query.amountMicros, 20000000)
