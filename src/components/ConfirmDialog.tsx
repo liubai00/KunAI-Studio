@@ -42,7 +42,7 @@ function getActionButtonClass(tone: 'primary' | 'secondary' | 'danger' | 'warnin
   if (tone === 'danger') {
     return 'bg-red-500 text-white shadow-[0_8px_20px_-6px_rgba(229,72,77,0.45)] hover:bg-red-600 hover:-translate-y-px'
   }
-  return 'bg-[linear-gradient(150deg,var(--accent),#e07a1f)] text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] hover:-translate-y-px'
+  return 'bg-[linear-gradient(150deg,var(--accent),#0891b2)] text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] hover:-translate-y-px'
 }
 
 export default function ConfirmDialog() {

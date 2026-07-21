@@ -1,11 +1,18 @@
-const ACTIVE_USER_KEY = 'image-studio-active-user'
+const ACTIVE_USER_KEY = 'kunai-studio-active-user'
+const LEGACY_ACTIVE_USER_KEY = 'image-studio-active-user'
+const LEGACY_STORAGE_KEYS: Record<string, string> = {
+  'kunai-studio': 'gpt-image-playground',
+}
 
 let activeUser = readActiveUser()
 const memoryStorage = new Map<string, string>()
 
 function readActiveUser() {
   try {
-    return window.sessionStorage.getItem(ACTIVE_USER_KEY) || 'local'
+    const current = window.sessionStorage.getItem(ACTIVE_USER_KEY)
+    const user = current || window.sessionStorage.getItem(LEGACY_ACTIVE_USER_KEY)
+    if (!current && user) window.sessionStorage.setItem(ACTIVE_USER_KEY, user)
+    return user || 'local'
   } catch {
     return 'local'
   }
@@ -28,6 +35,7 @@ export function clearActiveStorageUser() {
   activeUser = 'local'
   try {
     window.sessionStorage.removeItem(ACTIVE_USER_KEY)
+    window.sessionStorage.removeItem(LEGACY_ACTIVE_USER_KEY)
   } catch {
     // 同上。
   }
@@ -62,7 +70,16 @@ export function createUserScopedStorage(): Storage {
         if (key?.endsWith(suffix)) window.localStorage.removeItem(key)
       }
     },
-    getItem: (key) => window.localStorage.getItem(getKey(key)),
+    getItem: (key) => {
+      const scopedKey = getKey(key)
+      const value = window.localStorage.getItem(scopedKey)
+      if (value !== null) return value
+      const legacyKey = LEGACY_STORAGE_KEYS[key]
+      if (!legacyKey) return null
+      const legacyValue = window.localStorage.getItem(getKey(legacyKey))
+      if (legacyValue !== null) window.localStorage.setItem(scopedKey, legacyValue)
+      return legacyValue
+    },
     key: (index) => window.localStorage.key(index),
     removeItem: (key) => window.localStorage.removeItem(getKey(key)),
     setItem: (key, value) => window.localStorage.setItem(getKey(key), value),

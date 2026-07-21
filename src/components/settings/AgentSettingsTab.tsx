@@ -130,14 +130,14 @@ export default function AgentSettingsTab({
           onBlur={commitAgentMaxToolRounds}
           type="number"
           min={1}
-          max={50}
+          max={platformMode ? 15 : 50}
           className="h-10 w-full rounded-[11px] border border-line bg-surface2 px-3 font-mono text-[12.5px] text-ink outline-none transition focus:border-accent focus:ring-[3px] focus:ring-accent-soft"
         />
         <div data-selectable-text className="mt-[7px] text-[12px] leading-[1.55] text-ink-3">
-          默认 15。用于限制 Agent 连续调用工具时的最大轮数，防止无限循环。
+          默认 15。平台模式最多 15 次，并保留最后一步让模型总结工具结果。
         </div>
       </label>
-      <div className="border-b border-line py-[15px] first:pt-0.5 last:border-b-0">
+      {!platformMode && <div className="border-b border-line py-[15px] first:pt-0.5 last:border-b-0">
         <div className="mb-[7px] flex items-center justify-between gap-3.5">
           <span className="text-[13.5px] font-medium text-ink">网络搜索</span>
           <button
@@ -160,7 +160,7 @@ export default function AgentSettingsTab({
         <div data-selectable-text className="text-[12px] leading-[1.55] text-ink-3">
           启用 Responses API 的 <code className="rounded-[5px] bg-surface2 px-[5px] py-px font-mono text-[0.92em] text-ink-2">web_search</code> 工具。模型每次调用此工具会产生少量固定价格的额外计费。
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

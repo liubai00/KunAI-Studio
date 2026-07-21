@@ -11,7 +11,11 @@ export function getPlatformCsrfToken() {
       return [[key, value]]
     }
   }))
-  return cookies['__Host-image_studio_csrf'] || cookies.image_studio_csrf || ''
+  return cookies['__Host-kunai_studio_csrf']
+    || cookies.kunai_studio_csrf
+    || cookies['__Host-image_studio_csrf']
+    || cookies.image_studio_csrf
+    || ''
 }
 
 export function createPlatformRequestId() {

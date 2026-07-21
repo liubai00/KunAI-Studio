@@ -1,10 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { useVersionCheck } from '../hooks/useVersionCheck'
 import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import ViewportTooltip from './ViewportTooltip'
-import HelpModal from './HelpModal'
 import HistoryModal from './HistoryModal'
 import { useFavoriteCollectionTitle } from './FavoriteCollections'
 import { EditIcon, HelpCircleIcon, HistoryIcon, InstallIcon, MoonIcon, SettingsIcon, SunIcon } from './icons'
@@ -12,14 +10,9 @@ import PlatformAccount from './platform/PlatformAccount'
 import { hasPlatformCapability, usePlatformStore } from '../platformStore'
 import { isPlatformModeEnabled } from '../lib/platformMode'
 import { toggleTheme, useResolvedTheme } from '../lib/theme'
+import { BrandMark } from './Brand'
 
-function BrandMark({ className = 'h-[31px] w-[31px]', apClassName = 'h-[11px] w-[11px]' }: { className?: string; apClassName?: string }) {
-  return (
-    <span className={`gi-brandmark ${className}`}>
-      <span className={`gi-aperture ${apClassName}`} />
-    </span>
-  )
-}
+const HelpModal = lazy(() => import('./HelpModal'))
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -44,7 +37,6 @@ export default function Header() {
   const activeConversation = agentConversations.find((item) => item.id === activeAgentConversationId)
   const favoriteCollectionTitle = useFavoriteCollectionTitle()
   const showFavoriteCollectionTitle = appMode === 'gallery' && Boolean(activeFavoriteCollectionId)
-  const { hasUpdate, latestRelease, dismiss } = useVersionCheck()
   const [showHelp, setShowHelp] = useState(false)
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [isPwaInstalled, setIsPwaInstalled] = useState(isInstalledPwa)
@@ -170,22 +162,10 @@ export default function Header() {
               {showFavoriteCollectionTitle ? (
                 <>
                   <span className="min-w-0 truncate text-[17px] font-display font-bold tracking-tight text-ink sm:hidden" title={favoriteCollectionTitle}>{favoriteCollectionTitle}</span>
-                  <span className="hidden items-center gap-[11px] sm:inline-flex"><BrandMark /><b className="font-display text-[16.5px] font-semibold tracking-[-0.012em] text-ink whitespace-nowrap">GPT Image Playground</b></span>
+                  <span className="hidden items-center gap-[11px] sm:inline-flex"><BrandMark className="h-[31px] w-[31px]" /><b className="font-display text-[16.5px] font-semibold tracking-[-0.012em] text-ink whitespace-nowrap">KunAI Studio</b></span>
                 </>
               ) : (
-                <span className="inline-flex items-center gap-[11px]"><BrandMark /><b className="font-display text-[16.5px] font-semibold tracking-[-0.012em] text-ink whitespace-nowrap hidden xs:inline sm:inline">GPT Image Playground</b></span>
-              )}
-              {hasUpdate && latestRelease && (
-                <a
-                  href={latestRelease.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={dismiss}
-                  className="absolute -right-1 -top-1 translate-x-full -translate-y-1/4 px-1 py-0.5 rounded-[4px] border border-red-500/30 text-[9px] font-black bg-red-500 text-white hover:bg-red-600 transition-all animate-fade-in leading-none shadow-sm"
-                  title={`新版本 ${latestRelease.tag}`}
-                >
-                  NEW
-                </a>
+                <span className="inline-flex items-center gap-[11px]"><BrandMark className="h-[31px] w-[31px]" /><b className="font-display text-[16.5px] font-semibold tracking-[-0.012em] text-ink whitespace-nowrap hidden xs:inline sm:inline">KunAI Studio</b></span>
               )}
             </h1>
             {appMode === 'agent' && <div className="hidden sm:flex items-center gap-0.5 relative pl-1.5 border-l border-line">
@@ -366,7 +346,11 @@ export default function Header() {
           </div>
         </div>
       </div>
-      {showHelp && <HelpModal appMode={appMode} isFavoriteCollectionOverview={appMode === 'gallery' && filterFavorite && !activeFavoriteCollectionId} onClose={() => setShowHelp(false)} />}
+      {showHelp && (
+        <Suspense fallback={null}>
+          <HelpModal appMode={appMode} isFavoriteCollectionOverview={appMode === 'gallery' && filterFavorite && !activeFavoriteCollectionId} onClose={() => setShowHelp(false)} />
+        </Suspense>
+      )}
     </>
   )
 }

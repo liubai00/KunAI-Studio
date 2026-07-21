@@ -1,6 +1,7 @@
 import type { AgentConversation, TaskRecord, StoredImage, StoredImageThumbnail } from '../types'
 import { getScopedDatabaseName } from './userStorage'
 
+// 保留早期 IndexedDB 名称，避免升级后丢失用户的图片与任务历史。
 const DB_NAME = 'gpt-image-playground'
 const DB_VERSION = 3
 const STORE_TASKS = 'tasks'

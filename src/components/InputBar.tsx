@@ -1,17 +1,22 @@
 import { useRef, useEffect, useCallback, useState, useMemo, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { Globe2, LockKeyhole } from 'lucide-react'
 import { ALL_FAVORITES_COLLECTION_ID, deleteFavoriteCollection, getTaskFavoriteCollectionIds, useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
 import { DEFAULT_PARAMS, type TaskRecord } from '../types'
 import { getActiveApiProfile, getAgentImageApiProfile, normalizeSettings } from '../lib/apiProfiles'
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, imageMentionMatches, insertImageMentionAtVisibleRange, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, stripImageMentionMarkers } from '../lib/promptImageMentions'
-import { normalizeImageSize } from '../lib/size'
+import { getImageSizeTier, normalizeImageSize } from '../lib/size'
+import { getQualityValueForSizeTier, QUALITY_TIER_OPTIONS } from '../lib/quality'
+import { isPlatformModeEnabled, PLATFORM_IMAGE_PROFILE_ID } from '../lib/platformMode'
+import { usePlatformStore } from '../platformStore'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { getSafeBoundingClientRect } from '../lib/domRect'
 import { collectAgentRoundOutputImageSlots } from '../lib/agentImageReferences'
 import { useHintTooltip } from '../hooks/useHintTooltip'
 import { downloadImageEntriesAsZip, downloadImageIds, formatExportFileTime, getTaskOutputImageZipEntries } from '../lib/downloadImages'
 import SizePickerModal from './SizePickerModal'
+import Select from './Select'
 import { CloseIcon } from './icons'
 import ButtonTooltip from './input/buttonTooltip'
 import DragUploadOverlay from './input/dragUploadOverlay'
@@ -384,7 +389,7 @@ function AtImageOptionThumb({ option }: { option: AtImageOption }) {
   )
 }
 
-export default function InputBar() {
+export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'panel' }) {
   const prompt = useStore((s) => s.prompt)
   const appMode = useStore((s) => s.appMode)
   const setPrompt = useStore((s) => s.setPrompt)
@@ -412,11 +417,15 @@ export default function InputBar() {
   const favoriteCollections = useStore((s) => s.favoriteCollections)
   const agentConversations = useStore((s) => s.agentConversations)
   const activeAgentConversationId = useStore((s) => s.activeAgentConversationId)
+  const setAgentConversationOptions = useStore((s) => s.setAgentConversationOptions)
   const filterStatus = useStore((s) => s.filterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const openFavoritePicker = useStore((s) => s.openFavoritePicker)
   const searchQuery = useStore((s) => s.searchQuery)
+  const platformAgentModels = usePlatformStore((s) => s.agentModels)
+  const defaultAgentModel = usePlatformStore((s) => s.defaultAgentModel)
+  const platformStatus = usePlatformStore((s) => s.status)
 
   const filteredTasks = useMemo(() => {
     const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
@@ -613,7 +622,6 @@ export default function InputBar() {
   const moveInputImage = useStore((s) => s.moveInputImage)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const cameraInputRef = useRef<HTMLInputElement>(null)
   const replaceFileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
@@ -649,6 +657,15 @@ export default function InputBar() {
   const [cursorPos, setCursorPos] = useState(0)
   const [menuLeft, setMenuLeft] = useState(0)
   const maskConflictNoticeShownRef = useRef(false)
+
+  useEffect(() => {
+    if (!showMobileUploadMenu) return
+    const closeUploadMenu = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowMobileUploadMenu(false)
+    }
+    document.addEventListener('keydown', closeUploadMenu)
+    return () => document.removeEventListener('keydown', closeUploadMenu)
+  }, [showMobileUploadMenu])
 
   const updateInputBarClearance = useCallback(() => {
     const bar = cardRef.current?.closest<HTMLElement>('[data-input-bar]')
@@ -704,6 +721,16 @@ export default function InputBar() {
   const activeAgentConversation = appMode === 'agent'
     ? agentConversations.find((conversation) => conversation.id === activeAgentConversationId) ?? null
     : null
+  const selectedAgentModel = activeAgentConversation?.modelId || defaultAgentModel || ''
+  const agentModelOptions = useMemo(() => [
+    ...(!selectedAgentModel ? [{ label: '请选择模型', value: '', disabled: true }] : []),
+    ...platformAgentModels.map((model) => ({
+      label: `${model.label}${model.selectable ? '' : '（未启用或未定价）'}`,
+      value: model.id,
+      disabled: !model.selectable,
+    })),
+  ], [platformAgentModels, selectedAgentModel])
+  const searchConfigured = Boolean(platformStatus?.image_studio?.search_configured)
   const activeAgentIsRunning = Boolean(activeAgentConversation?.rounds.some((round) => round.status === 'running'))
   const effectiveSettings = useMemo(() => (
     activeProfile.id === settingsActiveProfile.id
@@ -761,16 +788,12 @@ export default function InputBar() {
     : normalizeImageSize(params.size) || DEFAULT_PARAMS.size
 
   const qualityOptions = isFalProvider
-    ? [
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
-      ]
+    ? QUALITY_TIER_OPTIONS
+    : activeProfile.id === PLATFORM_IMAGE_PROFILE_ID
+      ? QUALITY_TIER_OPTIONS
     : [
         { label: 'auto', value: 'auto' },
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
+        ...QUALITY_TIER_OPTIONS,
       ]
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
   const uploadImageTooltipText = atImageLimit ? `参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加` : '上传图片'
@@ -1927,6 +1950,42 @@ export default function InputBar() {
     />
   )
 
+  const renderAgentControls = () => {
+    if (!isPlatformModeEnabled() || appMode !== 'agent' || !activeAgentConversation) return null
+    const modelLocked = activeAgentConversation.rounds.length > 0
+    const searchEnabled = Boolean(activeAgentConversation.searchEnabled)
+
+    return (
+      <div data-agent-composer-tools className="mt-3 flex min-w-0 items-center gap-2 border-b border-line px-1 pb-3">
+        <div className="min-w-0 max-w-[15rem] flex-1 sm:flex-none sm:w-[13rem]" title={modelLocked ? '模型已按对话锁定；如需切换请新建对话' : undefined}>
+          <Select
+            value={selectedAgentModel}
+            onChange={(value) => setAgentConversationOptions(activeAgentConversation.id, { modelId: String(value) })}
+            options={agentModelOptions}
+            disabled={modelLocked}
+            ariaLabel="Agent 对话模型"
+            className="h-11 rounded-xl border border-line bg-surface2 px-3 text-xs font-semibold text-ink transition-colors hover:border-line2 focus-visible:border-accent sm:h-9"
+          />
+        </div>
+        <button
+          type="button"
+          data-agent-search-toggle
+          onClick={() => setAgentConversationOptions(activeAgentConversation.id, { searchEnabled: !searchEnabled })}
+          disabled={!searchConfigured}
+          aria-label={searchConfigured ? `联网搜索${searchEnabled ? '已开启' : '已关闭'}` : '联网搜索服务暂不可用'}
+          aria-pressed={searchEnabled}
+          title={searchConfigured ? `联网搜索${searchEnabled ? '已开启' : '已关闭'}` : '联网搜索服务暂不可用'}
+          className={`inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition-colors sm:h-9 sm:min-w-0 ${searchEnabled && searchConfigured ? 'border-accent/40 bg-accent-soft text-accent-ink' : 'border-line bg-surface2 text-ink-3 hover:border-line2 hover:text-ink'} disabled:cursor-not-allowed disabled:opacity-50`}
+        >
+          <Globe2 className="h-4 w-4" />
+          <span className="hidden sm:inline">联网</span>
+        </button>
+        {modelLocked && <span className="hidden min-w-0 items-center gap-1 truncate text-[11px] text-ink-3 md:inline-flex"><LockKeyhole className="h-3.5 w-3.5 shrink-0" />模型已锁定</span>}
+        {!searchConfigured && <span className="hidden truncate text-[11px] text-ink-3 sm:inline">联网搜索服务暂不可用</span>}
+      </div>
+    )
+  }
+
   const showFavoriteCollectionBatchBar = inCollectionOverview && selectedFavoriteCollectionIds.length > 0
   const showTaskBatchBar = !showFavoriteCollectionBatchBar && selectedTaskIds.length > 0
 
@@ -1937,13 +1996,16 @@ export default function InputBar() {
       {showSizePicker && (
         <SizePickerModal
           currentSize={isFalTextToImage && params.size === 'auto' ? DEFAULT_FAL_IMAGE_SIZE : params.size}
-          onSelect={(size) => setParams({ size })}
+          onSelect={(size) => setParams({
+            size,
+            ...(activeProfile.id === PLATFORM_IMAGE_PROFILE_ID ? { quality: getQualityValueForSizeTier(getImageSizeTier(size)) } : {}),
+          })}
           onClose={() => setShowSizePicker(false)}
           allowAuto={!isFalTextToImage}
         />
       )}
 
-      <div data-input-bar className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-3 sm:px-4 transition-all duration-300">
+      <div data-input-bar data-input-layout={variant} className={variant === 'panel' ? 'relative z-20 w-full transition-all duration-300' : 'fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-3 sm:px-4 transition-all duration-300'}>
         <InputBatchBars
           showFavoriteCollectionBatchBar={showFavoriteCollectionBatchBar}
           showTaskBatchBar={showTaskBatchBar}
@@ -1961,7 +2023,7 @@ export default function InputBar() {
           onDownloadSelected={handleDownloadSelected}
           onDeleteSelected={handleDeleteSelected}
         />
-        <div ref={cardRef} className="bg-[var(--dock-bg)] backdrop-blur-2xl border border-line2 shadow-lift rounded-[22px] p-3 sm:p-4">
+        <div ref={cardRef} className={variant === 'panel' ? 'kunai-input-panel bg-[var(--dock-bg)] backdrop-blur-2xl border border-line2 shadow-card rounded-[20px] p-3 sm:p-4' : 'bg-[var(--dock-bg)] backdrop-blur-2xl border border-line2 shadow-lift rounded-[22px] p-3 sm:p-4'}>
           {/* 移动端拖动条 */}
           <div
             ref={handleRef}
@@ -2094,6 +2156,8 @@ export default function InputBar() {
             )}
           </div>
 
+          {renderAgentControls()}
+
           {/* 参数 + 按钮 */}
           <div className="mt-3">
             {/* 桌面端布局 */}
@@ -2108,6 +2172,7 @@ export default function InputBar() {
                 >
                   <ButtonTooltip visible={attachHover} text={uploadImageTooltipText} />
                   <button
+                    type="button"
                     onClick={() => !atImageLimit && fileInputRef.current?.click()}
                     className={`grid h-11 w-11 place-items-center rounded-[13px] border transition-all ${
                       atImageLimit
@@ -2135,7 +2200,7 @@ export default function InputBar() {
                         ? 'bg-red-500 hover:bg-red-600'
                         : !hasSubmitApiConfig
                         ? 'bg-ink-3 cursor-pointer'
-                        : 'bg-[linear-gradient(150deg,var(--accent),#e07a1f)] shadow-[0_8px_20px_-6px_var(--accent-glow)] hover:-translate-y-px disabled:opacity-50 disabled:translate-y-0 disabled:cursor-not-allowed'
+                        : 'bg-[linear-gradient(150deg,var(--accent),#0891b2)] shadow-[0_8px_20px_-6px_var(--accent-glow)] hover:-translate-y-px disabled:opacity-50 disabled:translate-y-0 disabled:cursor-not-allowed'
                     }`}
                     aria-label={submitButtonAriaLabel}
                   >
@@ -2169,6 +2234,7 @@ export default function InputBar() {
                   onMouseLeave={() => setAttachHover(false)}
                 >
                   <button
+                    type="button"
                     onClick={() => {
                       if (!atImageLimit) {
                         setShowMobileUploadMenu(!showMobileUploadMenu)
@@ -2180,6 +2246,9 @@ export default function InputBar() {
                         : 'border-line bg-surface2 text-ink-2 hover:border-line2 hover:text-ink'
                     }`}
                     aria-label={uploadImageTooltipText}
+                    aria-controls="mobile-upload-menu"
+                    aria-expanded={showMobileUploadMenu}
+                    aria-haspopup="menu"
                   >
                     <svg
                       className={`w-5 h-5 transition-transform duration-200 ${showMobileUploadMenu ? 'rotate-90' : ''}`}
@@ -2191,29 +2260,18 @@ export default function InputBar() {
                     </svg>
                   </button>
 
-                  {/* Mobile Upload Menu */}
+                  {/* 移动端上传菜单 */}
                   {showMobileUploadMenu && (
                     <>
                       <div
                         className="fixed inset-0 z-40"
                         onClick={() => setShowMobileUploadMenu(false)}
                       />
-                      <div className="absolute bottom-full left-0 mb-2 w-32 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                      <div id="mobile-upload-menu" role="menu" className="absolute bottom-full left-0 z-50 mb-2 w-36 overflow-hidden rounded-xl border border-line2 bg-surface shadow-lift animate-in fade-in slide-in-from-bottom-2 duration-200">
                         <button
-                          className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
-                          onClick={() => {
-                            setShowMobileUploadMenu(false)
-                            cameraInputRef.current?.click()
-                          }}
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                          </svg>
-                          拍照
-                        </button>
-                        <button
-                          className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
+                          type="button"
+                          role="menuitem"
+                          className="flex min-h-11 w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-ink-2 transition-colors hover:bg-surface2 hover:text-ink"
                           onClick={() => {
                             setShowMobileUploadMenu(false)
                             fileInputRef.current?.click()
@@ -2238,12 +2296,12 @@ export default function InputBar() {
                     onClick={() => activeAgentIsRunning ? stopActiveAgentResponse() : hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
                     disabled={activeAgentIsRunning ? false : hasSubmitApiConfig ? !canSubmit : false}
                     aria-label={submitButtonAriaLabel}
-                    className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-[13px] text-sm font-medium text-white transition-all ${
+                    className={`flex h-11 w-full items-center justify-center gap-2 rounded-[13px] text-sm font-medium text-white transition-all ${
                       activeAgentIsRunning
                         ? 'bg-red-500 hover:bg-red-600'
                         : !hasSubmitApiConfig
                         ? 'bg-ink-3 cursor-pointer'
-                        : 'bg-[linear-gradient(150deg,var(--accent),#e07a1f)] shadow-[0_8px_20px_-6px_var(--accent-glow)] disabled:opacity-50 disabled:cursor-not-allowed'
+                        : 'bg-[linear-gradient(150deg,var(--accent),#0891b2)] shadow-[0_8px_20px_-6px_var(--accent-glow)] disabled:opacity-50 disabled:cursor-not-allowed'
                     }`}
                   >
                     {activeAgentIsRunning ? (
@@ -2267,14 +2325,6 @@ export default function InputBar() {
             type="file"
             accept="image/*"
             multiple
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
             className="hidden"
             onChange={handleFileUpload}
           />

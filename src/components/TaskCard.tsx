@@ -362,7 +362,7 @@ export default function TaskCard({
           !isSwiping ? 'transition-[box-shadow,border-color,transform] hover:-translate-y-1' : 'transition-[box-shadow,border-color]'
         } ${
           task.status === 'running'
-            ? 'gi-run generating'
+            ? 'kunai-ui-run generating'
             : isSelected
             ? 'border-accent ring-2 ring-accent/50'
             : 'border-line hover:border-line2'
@@ -414,13 +414,13 @@ export default function TaskCard({
                 onError={() => setStreamPreviewLoaded(false)}
               />
               {streamPreviewLoaded && (
-                <span className="gi-badge absolute right-2 top-2 z-[2] !bg-accent/90 !text-white">预览</span>
+                <span className="kunai-ui-badge absolute right-2 top-2 z-[2] !bg-accent/90 !text-white">预览</span>
               )}
             </>
           )}
           {task.status === 'running' && (!streamPreviewSrc || !streamPreviewLoaded) && (
             <div className="absolute inset-0 z-[2] flex flex-col items-center justify-center gap-2.5 bg-accent-soft">
-              <span className="gi-spinner h-[30px] w-[30px]" />
+              <span className="kunai-ui-spinner h-[30px] w-[30px]" />
               <span className="text-[11px] font-medium text-ink-3">生成中…</span>
             </div>
           )}
@@ -473,14 +473,14 @@ export default function TaskCard({
           {!isSelected && (
             <div className="absolute left-2 top-2 z-[2] flex items-center gap-1.5">
               {showRunningTimer || task.status !== 'done' || !coverRatio || !coverSize ? (
-                <span className="gi-badge">
+                <span className="kunai-ui-badge">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 8v4l3 2" /></svg>
                   {duration}
                 </span>
               ) : (
                 <>
-                  <span className="gi-badge">{coverRatio}</span>
-                  <span className="gi-badge">{coverSize}</span>
+                  <span className="kunai-ui-badge">{coverRatio}</span>
+                  <span className="kunai-ui-badge">{coverSize}</span>
                 </>
               )}
             </div>
@@ -488,7 +488,7 @@ export default function TaskCard({
 
           {/* 数量角标 */}
           {hasCover && (hasPartialOutputFailure || task.outputImages.length > 1) && (
-            <span className="gi-count absolute bottom-2 right-2 z-[2]">
+            <span className="kunai-ui-count absolute bottom-2 right-2 z-[2]">
               {hasPartialOutputFailure ? <>{requestedOutputCount} | <span className="font-semibold text-amber-300">{outputSuccessCount}</span></> : task.outputImages.length}
             </span>
           )}
@@ -551,48 +551,48 @@ export default function TaskCard({
             onTouchCancel={(e) => e.stopPropagation()}
           >
             {(task.apiProfileName || task.apiProvider) && (
-              <span className="gi-chip flex-shrink-0 inline-flex items-center gap-1" title={task.apiProfileName || task.apiProvider}>
+              <span className="kunai-ui-chip flex-shrink-0 inline-flex items-center gap-1" title={task.apiProfileName || task.apiProvider}>
                 <CodeIcon className="w-3 h-3 flex-shrink-0 text-ink-3" />
                 <span className="truncate max-w-[8rem]">{task.apiProfileName || task.apiProvider}</span>
               </span>
             )}
             {showModel && (
-              <span className="gi-chip gi-chip-amber flex-shrink-0 inline-flex items-center gap-1" title={task.apiModel}>
+              <span className="kunai-ui-chip kunai-ui-chip-accent flex-shrink-0 inline-flex items-center gap-1" title={task.apiModel}>
                 <span className="truncate max-w-[8rem]">{task.apiModel}</span>
               </span>
             )}
             {task.maskImageId && (
-              <span className="gi-chip flex-shrink-0 inline-flex items-center gap-1 !text-info" style={{ background: 'rgba(47,109,240,0.12)', borderColor: 'transparent' }}>
+              <span className="kunai-ui-chip flex-shrink-0 inline-flex items-center gap-1 !text-info" style={{ background: 'rgba(47,109,240,0.12)', borderColor: 'transparent' }}>
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                 局部重绘
               </span>
             )}
             {showTransparentOutput && (
-              <span className="gi-chip gi-chip-emerald flex-shrink-0 inline-flex items-center gap-1">
+              <span className="kunai-ui-chip kunai-ui-chip-success flex-shrink-0 inline-flex items-center gap-1">
                 <TransparentBgIcon className="w-3 h-3 flex-shrink-0" />
                 透明背景
               </span>
             )}
             {showQuality && (
-              <span className="gi-chip flex-shrink-0 inline-flex items-center gap-1">
+              <span className="kunai-ui-chip flex-shrink-0 inline-flex items-center gap-1">
                 <span className="text-ink-3">质量</span>
                 {qualityDisplay.isMismatch ? <ActualValueBadge value={qualityDisplay.displayValue} className="px-1 rounded-sm" /> : <span>{qualityDisplay.displayValue}</span>}
               </span>
             )}
             {showSize && (
-              <span className="gi-chip flex-shrink-0 inline-flex items-center gap-1">
+              <span className="kunai-ui-chip flex-shrink-0 inline-flex items-center gap-1">
                 <span className="text-ink-3">尺寸</span>
                 {sizeDisplay.isMismatch ? <ActualValueBadge value={sizeDisplay.displayValue} className="px-1 rounded-sm" /> : <span>{sizeDisplay.displayValue}</span>}
               </span>
             )}
             {showFormat && (
-              <span className="gi-chip flex-shrink-0 inline-flex items-center gap-1">
+              <span className="kunai-ui-chip flex-shrink-0 inline-flex items-center gap-1">
                 <span className="text-ink-3">格式</span>
                 {formatDisplay.isMismatch ? <ActualValueBadge value={formatDisplay.displayValue} className="px-1 rounded-sm" /> : <span>{formatDisplay.displayValue}</span>}
               </span>
             )}
             {showN && (
-              <span className="gi-chip flex-shrink-0 inline-flex items-center gap-1">
+              <span className="kunai-ui-chip flex-shrink-0 inline-flex items-center gap-1">
                 <span className="text-ink-3">数量</span>
                 {nDisplay.isMismatch ? <ActualValueBadge value={nDisplay.displayValue} className="px-1 rounded-sm" /> : <span>{nDisplay.displayValue}</span>}
               </span>

@@ -15,14 +15,13 @@ const App = lazy(() => import('./App'))
 const platformModeEnabled = isPlatformModeEnabled()
 
 installMobileViewportGuards()
-// Follow the persisted theme preference; platform mode defaults to light when
-// the user has never chosen one. Manual toggle lives in the header.
-initTheme(platformModeEnabled ? 'light' : 'system')
+// 平台首次访问默认使用深空主题，用户切换后继续跟随持久化偏好。
+initTheme(platformModeEnabled ? 'dark' : 'system')
 
 if ('serviceWorker' in navigator) {
   if (import.meta.env.PROD) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch((error) => {
+      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js?v=${encodeURIComponent(__APP_VERSION__)}`).catch((error) => {
         console.error('Service worker registration failed:', error)
       })
     })
@@ -35,9 +34,9 @@ if ('serviceWorker' in navigator) {
 
 function LoadingScreen() {
   return (
-    <div className="min-h-screen bg-[#f7f7f5] text-[#282724] flex items-center justify-center dark:bg-[#121211] dark:text-white">
+    <div className="auth-shell min-h-screen text-ink flex items-center justify-center">
       <div className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
-        <span className="h-5 w-5 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
+        <span className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
         正在连接工作台
       </div>
     </div>

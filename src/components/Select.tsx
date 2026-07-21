@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { DEFAULT_DROPDOWN_MAX_HEIGHT } from '../lib/dropdown'
 import { ChevronDownIcon, EditIcon, PlusIcon, TrashIcon, DragHandleIcon } from './icons'
@@ -8,6 +8,7 @@ import { useTooltip } from '../hooks/useTooltip'
 interface Option {
   label: string
   value: string | number
+  disabled?: boolean
   variant?: 'action' | 'danger'
   draggable?: boolean
   actions?: Array<{
@@ -24,11 +25,13 @@ interface SelectProps {
   options: Option[]
   disabled?: boolean
   className?: string
+  ariaLabel?: string
   onOpenChange?: (isOpen: boolean) => void
 }
 
-export default function Select({ value, onChange, onReorder, options, disabled, className, onOpenChange }: SelectProps) {
+export default function Select({ value, onChange, onReorder, options, disabled, className, ariaLabel, onOpenChange }: SelectProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(-1)
   const [menuMaxHeight, setMenuMaxHeight] = useState(DEFAULT_DROPDOWN_MAX_HEIGHT)
   const [placement, setPlacement] = useState<'bottom' | 'top'>('bottom')
   const [draggedValue, setDraggedValue] = useState<string | number | null>(null)
@@ -47,6 +50,7 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
   const dragScrollIntervalRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLDivElement>(null)
+  const menuId = useId()
 
   const triggerTooltip = useTooltip()
   const [hoveredOptionTooltip, setHoveredOptionTooltip] = useState<string | number | null>(null)
@@ -61,6 +65,61 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
   }
 
   const selectedOption = options.find((o) => o.value === value)
+
+  const openMenu = () => {
+    if (disabled) return
+    const selectedIndex = options.findIndex((option) => option.value === value && !option.disabled)
+    const firstEnabledIndex = options.findIndex((option) => !option.disabled)
+    setActiveIndex(selectedIndex >= 0 ? selectedIndex : firstEnabledIndex)
+    setIsOpen(true)
+  }
+
+  const moveActiveOption = (direction: 1 | -1) => {
+    if (!options.some((option) => !option.disabled)) return
+    const startIndex = activeIndex >= 0 ? activeIndex : options.findIndex((option) => option.value === value)
+    for (let offset = 1; offset <= options.length; offset += 1) {
+      const index = (Math.max(0, startIndex) + direction * offset + options.length) % options.length
+      if (!options[index].disabled) {
+        setActiveIndex(index)
+        return
+      }
+    }
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (disabled) return
+    if (event.key === 'Escape') {
+      if (isOpen) event.preventDefault()
+      setIsOpen(false)
+      return
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (!isOpen) {
+        openMenu()
+        return
+      }
+      moveActiveOption(event.key === 'ArrowDown' ? 1 : -1)
+      return
+    }
+    if (event.key === 'Home' || event.key === 'End') {
+      if (!isOpen) return
+      event.preventDefault()
+      const enabledIndexes = options.map((option, index) => option.disabled ? -1 : index).filter((index) => index >= 0)
+      setActiveIndex(event.key === 'Home' ? enabledIndexes[0] : enabledIndexes[enabledIndexes.length - 1])
+      return
+    }
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    if (!isOpen) {
+      openMenu()
+      return
+    }
+    const option = options[activeIndex]
+    if (!option || option.disabled) return
+    onChange(option.value)
+    setIsOpen(false)
+  }
 
   useEffect(() => {
     return () => {
@@ -160,7 +219,11 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
     e.preventDefault()
     e.stopPropagation()
     // 动画和位置的计算在 useEffect 中进行，这里可以先假设一个默认值或保留当前状态
-    setIsOpen(!isOpen)
+    if (isOpen) {
+      setIsOpen(false)
+    } else {
+      openMenu()
+    }
   }
 
   const clearTouchDrag = () => {
@@ -181,12 +244,20 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
     <div ref={containerRef} className="relative w-full">
       <div
         ref={triggerRef}
+        role="combobox"
+        tabIndex={disabled ? -1 : 0}
+        aria-label={ariaLabel}
+        aria-controls={menuId}
+        aria-expanded={isOpen}
+        aria-disabled={disabled || undefined}
+        aria-activedescendant={isOpen && activeIndex >= 0 ? `${menuId}-option-${activeIndex}` : undefined}
         {...triggerTooltip.handlers}
         onClick={(e) => {
           triggerTooltip.handlers.onClick?.()
           handleToggle(e)
           triggerTooltip.dismiss()
         }}
+        onKeyDown={handleKeyDown}
         className={`flex items-center justify-between gap-1 w-full cursor-pointer select-none ${className ?? ''} ${
           disabled ? '!opacity-50 !cursor-not-allowed !bg-surface2' : ''
         }`}
@@ -200,14 +271,20 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
 
       {isOpen && (
         <div
+          id={menuId}
+          role="listbox"
           className={`absolute z-50 w-full overflow-hidden overflow-y-auto rounded-xl border border-line2 bg-surface py-1 shadow-lift custom-scrollbar ${
             placement === 'top' ? 'bottom-full mb-1.5 animate-dropdown-up' : 'top-full mt-1.5 animate-dropdown-down'
           }`}
           style={{ maxHeight: menuMaxHeight }}
         >
-          {options.map((option) => (
+          {options.map((option, optionIndex) => (
             <div
+              id={`${menuId}-option-${optionIndex}`}
               key={option.value}
+              role="option"
+              aria-selected={option.value === value}
+              aria-disabled={option.disabled || undefined}
               data-option-value={String(option.value)}
               draggable={option.draggable}
               onDragStart={(e) => {
@@ -382,12 +459,16 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
               onClick={(e) => {
                 if ((e.target as HTMLElement).closest('button, [data-drag-handle]')) return
                 e.preventDefault()
+                if (option.disabled) return
                 onChange(option.value)
                 setIsOpen(false)
                 clearOptionTooltipTimer()
                 setHoveredOptionTooltip(null)
               }}
-              onMouseEnter={() => setHoveredOptionTooltip(option.value)}
+              onMouseEnter={() => {
+                if (!option.disabled) setActiveIndex(optionIndex)
+                setHoveredOptionTooltip(option.value)
+              }}
               onMouseLeave={() => {
                 clearOptionTooltipTimer()
                 setHoveredOptionTooltip(null)
@@ -397,14 +478,16 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
                 clearOptionTooltipTimer()
                 setHoveredOptionTooltip(null)
               }}
-              className={`relative flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs transition-colors ${
+              className={`relative flex min-h-11 items-center justify-between gap-2 px-3 py-2 text-xs transition-colors sm:min-h-9 ${
                 draggedValue === option.value
                   ? 'opacity-40 bg-surface2'
+                  : option.disabled
+                  ? 'cursor-not-allowed text-ink-3 opacity-50'
                   : option.variant === 'action'
                   ? 'font-semibold text-accent-ink hover:bg-accent-soft'
                   : option.variant === 'danger'
                   ? 'font-semibold text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10'
-                  : option.value === value
+                  : option.value === value || optionIndex === activeIndex
                   ? 'bg-accent-soft text-accent-ink font-medium'
                   : 'text-ink hover:bg-surface2'
               }`}

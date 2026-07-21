@@ -67,6 +67,21 @@ export function normalizeImageSize(size: string) {
   return `${width}x${height}`
 }
 
+export function getImageSizeTier(size: string): SizeTier {
+  const match = normalizeImageSize(size).match(SIZE_PATTERN)
+  if (!match) return '1K'
+  const pixels = Number(match[1]) * Number(match[2])
+  if (pixels <= TIER_PIXEL_BUDGET['1K']) return '1K'
+  if (pixels <= TIER_PIXEL_BUDGET['2K']) return '2K'
+  return '4K'
+}
+
+export function calculateImageSizeForTier(tier: SizeTier, currentSize: string) {
+  const match = normalizeImageSize(currentSize).match(SIZE_PATTERN)
+  const ratio = match ? `${match[1]}:${match[2]}` : '1:1'
+  return calculateImageSize(tier, ratio) || currentSize
+}
+
 export function parseRatio(ratio: string) {
   const match = ratio.match(RATIO_PATTERN)
   if (!match) return null

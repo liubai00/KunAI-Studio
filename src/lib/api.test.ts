@@ -442,7 +442,7 @@ describe('callImageApi', () => {
       const body = JSON.parse(String((init as RequestInit).body))
       expect(body.n).toBeUndefined()
       expect(body.stream).toBeUndefined()
-      expect(new Headers((init as RequestInit).headers).get('X-Image-Studio-User')).toBe('42')
+      expect(new Headers((init as RequestInit).headers).get('X-KunAI-User')).toBe('42')
     }
     expect(result.images).toHaveLength(3)
   })

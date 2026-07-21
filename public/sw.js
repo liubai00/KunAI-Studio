@@ -1,4 +1,5 @@
-const CACHE_NAME = 'gpt-image-playground-v0.1.5'
+const VERSION = new URL(self.location.href).searchParams.get('v') || 'unknown'
+const CACHE_NAME = `kunai-studio-v${VERSION}`
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.svg']
 
 self.addEventListener('install', (event) => {

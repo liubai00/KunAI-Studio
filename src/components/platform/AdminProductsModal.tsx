@@ -6,7 +6,8 @@ import type { PlatformProduct } from '../../platformStore'
 
 interface AdminProductsModalProps {
   onClose: () => void
-  returnFocusRef: RefObject<HTMLElement | null>
+  returnFocusRef?: RefObject<HTMLElement | null>
+  embedded?: boolean
 }
 
 interface Draft {
@@ -24,7 +25,7 @@ interface Draft {
 
 const emptyDraft = (): Draft => ({
   id: '',
-  kind: 'membership',
+  kind: 'credits',
   name: '',
   description: '',
   price: '',
@@ -78,9 +79,12 @@ export default function AdminProductsModal(props: AdminProductsModalProps) {
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    dialogRef.current?.focus()
+    if (!props.embedded) {
+      document.body.style.overflow = 'hidden'
+      dialogRef.current?.focus()
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (props.embedded) return
       if (event.key === 'Escape') { props.onClose(); return }
       if (event.key !== 'Tab' || !dialogRef.current) return
       const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
@@ -98,11 +102,11 @@ export default function AdminProductsModal(props: AdminProductsModalProps) {
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => {
-      document.body.style.overflow = previousOverflow
+      if (!props.embedded) document.body.style.overflow = previousOverflow
       document.removeEventListener('keydown', handleKeyDown)
-      props.returnFocusRef.current?.focus()
+      props.returnFocusRef?.current?.focus()
     }
-  }, [props.onClose, props.returnFocusRef])
+  }, [props.embedded, props.onClose, props.returnFocusRef])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -147,12 +151,12 @@ export default function AdminProductsModal(props: AdminProductsModalProps) {
   const field = 'h-9 w-full rounded-[11px] border border-line bg-surface px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-[3px] focus:ring-accent-soft placeholder:text-ink-3'
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-[rgba(12,11,9,0.55)] p-3 backdrop-blur-sm animate-overlay-in" onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
-      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="admin-products-title" tabIndex={-1} className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[22px] border border-line2 bg-surface shadow-lift outline-none animate-modal-in">
+    <div className={props.embedded ? 'kunai-embedded-modal' : 'fixed inset-0 z-[95] flex items-center justify-center bg-[rgba(5,8,24,0.72)] p-3 backdrop-blur-sm animate-overlay-in'} onMouseDown={(event) => !props.embedded && event.target === event.currentTarget && props.onClose()}>
+      <section ref={dialogRef} role={props.embedded ? 'region' : 'dialog'} aria-modal={props.embedded ? undefined : true} aria-labelledby="admin-products-title" tabIndex={-1} className={props.embedded ? 'flex min-h-[520px] w-full flex-col overflow-hidden rounded-[22px] border border-line2 bg-surface shadow-card outline-none' : 'flex max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[22px] border border-line2 bg-surface shadow-lift outline-none animate-modal-in'}>
         <header className="flex shrink-0 items-start justify-between border-b border-line px-5 py-4 sm:px-6 sm:py-5">
           <div>
             <h2 id="admin-products-title" className="flex items-center gap-2 font-display text-lg font-semibold text-ink"><Store className="h-5 w-5 text-accent" />商品与定价</h2>
-            <p className="mt-1 text-sm text-ink-3">配置会员套餐与次数包，用户在账单页购买</p>
+            <p className="mt-1 text-sm text-ink-3">配置生图次数包；历史会员商品仅保留下架管理</p>
           </div>
           <button type="button" onClick={props.onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] text-ink-3 transition-colors hover:bg-surface2 hover:text-ink" aria-label="关闭">
             <X className="h-4 w-4" />
@@ -181,7 +185,7 @@ export default function AdminProductsModal(props: AdminProductsModalProps) {
                       {product.id} · {product.kind === 'membership' ? `${product.duration_days} 天` : `${product.credits} 次`}
                     </div>
                   </div>
-                  <span className="shrink-0 font-mono text-sm font-semibold text-ink">${product.price}</span>
+                  <span className="shrink-0 font-mono text-sm font-semibold text-ink">¥{product.price}</span>
                   <button type="button" onClick={() => { setDraft(draftFromProduct(product)); setConfirmDelete(null) }} className="h-8 shrink-0 rounded-[8px] border border-line bg-surface px-3 text-xs font-medium text-ink transition-colors hover:border-line2">编辑</button>
                   {confirmDelete === product.id ? (
                     <span className="inline-flex shrink-0 items-center gap-1">
@@ -210,21 +214,21 @@ export default function AdminProductsModal(props: AdminProductsModalProps) {
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
                 <span className="text-xs text-ink-3">商品 ID（英文/数字/-/_）</span>
-                <input required value={draft.id} disabled={!draft.isNew} onChange={(e) => setDraft({ ...draft, id: e.target.value })} placeholder="pro-monthly" className={`${field} font-mono disabled:opacity-60`} />
+                <input required value={draft.id} disabled={!draft.isNew} onChange={(e) => setDraft({ ...draft, id: e.target.value })} placeholder="credits-100" className={`${field} font-mono disabled:opacity-60`} />
               </label>
               <label className="space-y-1">
                 <span className="text-xs text-ink-3">类型</span>
-                <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as Draft['kind'] })} className={field}>
-                  <option value="membership">会员（有效期不限次）</option>
+                <select value={draft.kind} disabled={!draft.isNew && draft.kind === 'membership'} onChange={(e) => setDraft({ ...draft, kind: e.target.value as Draft['kind'] })} className={`${field} disabled:opacity-60`}>
+                  {draft.kind === 'membership' && <option value="membership">历史会员（仅可下架）</option>}
                   <option value="credits">次数包</option>
                 </select>
               </label>
               <label className="space-y-1">
                 <span className="text-xs text-ink-3">名称</span>
-                <input required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Pro 月卡" className={field} />
+                <input required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="100 次生图包" className={field} />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-ink-3">价格（USD）</span>
+                <span className="text-xs text-ink-3">价格（人民币）</span>
                 <input required value={draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} placeholder="9.99" inputMode="decimal" className={`${field} font-mono`} />
               </label>
               {draft.kind === 'membership' ? (
@@ -244,7 +248,7 @@ export default function AdminProductsModal(props: AdminProductsModalProps) {
               </label>
               <label className="space-y-1 sm:col-span-2">
                 <span className="text-xs text-ink-3">描述（可选）</span>
-                <input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="面向重度用户，畅享不限次生成" className={field} />
+                <input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="购买后增加对应生图次数" className={field} />
               </label>
             </div>
             <div className="mt-3 flex items-center justify-between gap-3">

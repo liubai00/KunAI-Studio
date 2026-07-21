@@ -24,7 +24,7 @@ export default {
           DEFAULT: 'hsl(var(--sidebar) / <alpha-value>)',
           foreground: 'hsl(var(--sidebar-foreground) / <alpha-value>)',
         },
-        // ===== GPT Image Playground design tokens =====
+        // ===== KunAI Studio design tokens =====
         // Colors used with Tailwind opacity modifiers (/20, /50…) use rgb-triplet
         // vars so `<alpha-value>` resolves; solid usage stays fully opaque.
         surface: 'rgb(var(--surface-rgb) / <alpha-value>)',

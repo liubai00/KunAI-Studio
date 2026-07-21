@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { getPlatformCsrfToken } from './lib/platformSession'
 import { clearActiveStorageUser, setActiveStorageUser } from './lib/userStorage'
 
-export const PLATFORM_SESSION_EVENT_KEY = 'image-studio-platform-session-event'
+export const PLATFORM_SESSION_EVENT_KEY = 'kunai-studio-platform-session-event'
 
 export interface PlatformUser {
   id: number
@@ -42,6 +42,36 @@ export interface PlatformProduct {
   active: boolean
 }
 
+export interface PlatformAgentModel {
+  id: string
+  label: string
+  enabled: boolean
+  selectable: boolean
+  is_default: boolean
+  sort_order: number
+  input_price_micros: number | null
+  cached_input_price_micros: number | null
+  output_price_micros: number | null
+  max_step_reserve_micros: number | null
+  last_seen_at: number | null
+}
+
+export interface AgentModelInput {
+  label?: string
+  enabled?: boolean
+  is_default?: boolean
+  sort_order?: number
+  input_price_micros?: number | null
+  cached_input_price_micros?: number | null
+  output_price_micros?: number | null
+  max_step_reserve_micros?: number | null
+}
+
+interface AgentModelList {
+  models: PlatformAgentModel[]
+  default_model?: string | null
+}
+
 export interface PlatformStatus {
   system_name?: string
   email_verification?: boolean
@@ -57,9 +87,18 @@ export interface PlatformStatus {
   image_studio?: {
     image_unit_price: number
     payment_url?: string
+    payment_enabled?: boolean
+    payment_provider?: 'dulupay' | 'custom' | null
+    payment_types?: Array<'wxpay' | 'alipay'>
+    recharge_min?: number
+    recharge_max?: number
     generation_min_role: number
     agent_min_role: number
     relay_configured?: boolean
+    agent_configured?: boolean
+    search_configured?: boolean
+    search_price?: number
+    default_agent_model?: string | null
     image_models?: string[]
     products?: PlatformProduct[]
   }
@@ -75,11 +114,35 @@ export interface PlatformLedgerEntry {
   created_at: number
 }
 
+export interface PlatformBillingRound {
+  id: number
+  conversation_id: string
+  round_id: string
+  status: 'open' | 'completed' | 'failed'
+  input_tokens: number
+  cached_input_tokens: number
+  output_tokens: number
+  search_calls: number
+  image_count: number
+  image_credits_used: number
+  agent_micros: number
+  search_micros: number
+  total_micros: number
+  created_at: number
+  updated_at: number
+}
+
 export interface PlatformBilling extends PlatformUser {
   payment_url?: string
+  payment_enabled?: boolean
+  payment_provider?: 'dulupay' | 'custom' | null
+  payment_types?: Array<'wxpay' | 'alipay'>
+  recharge_min?: number
+  recharge_max?: number
   image_unit_price: number
   products?: PlatformProduct[]
   entries: PlatformLedgerEntry[]
+  agent_rounds?: PlatformBillingRound[]
 }
 
 export interface ProductInput {
@@ -138,6 +201,8 @@ interface PlatformState {
   phase: 'loading' | 'anonymous' | 'authenticated' | 'error'
   user: PlatformUser | null
   status: PlatformStatus | null
+  agentModels: PlatformAgentModel[]
+  defaultAgentModel: string | null
   error: string | null
   bootstrap: () => Promise<void>
   refreshSession: () => Promise<void>
@@ -155,6 +220,10 @@ interface PlatformState {
   listProducts: () => Promise<PlatformProduct[]>
   saveProduct: (product: ProductInput) => Promise<PlatformProduct>
   deleteProduct: (id: string) => Promise<{ deleted: boolean }>
+  loadAgentModels: () => Promise<PlatformAgentModel[]>
+  listAgentModels: () => Promise<PlatformAgentModel[]>
+  refreshAgentModels: () => Promise<PlatformAgentModel[]>
+  saveAgentModel: (id: string, changes: AgentModelInput) => Promise<PlatformAgentModel>
   redeemCode: (code: string) => Promise<RedeemResult>
   listRedemptionCodes: (unusedOnly?: boolean) => Promise<RedemptionCode[]>
   createRedemptionCodes: (input: RedemptionInput) => Promise<{ codes: string[] }>
@@ -199,6 +268,12 @@ async function loadSession() {
   return user
 }
 
+function readAgentModelList(value: AgentModelList | PlatformAgentModel[]) {
+  if (Array.isArray(value)) return { models: value, defaultModel: value.find((model) => model.is_default)?.id ?? null }
+  const models = Array.isArray(value?.models) ? value.models : []
+  return { models, defaultModel: value?.default_model ?? models.find((model) => model.is_default)?.id ?? null }
+}
+
 function activateUser(user: PlatformUser) {
   setActiveStorageUser(String(user.id))
 }
@@ -215,6 +290,8 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
   phase: 'loading',
   user: null,
   status: null,
+  agentModels: [],
+  defaultAgentModel: null,
   error: null,
   bootstrap: async () => {
     set({ phase: 'loading', error: null })
@@ -225,6 +302,7 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
         const user = await loadSession()
         activateUser(user)
         set({ phase: 'authenticated', user, error: null })
+        await get().loadAgentModels().catch(() => [])
       } catch (err) {
         clearActiveStorageUser()
         if ((err as Error & { status?: number }).status === 401) {
@@ -295,7 +373,11 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
       }),
     })
   },
-  loadBilling: () => request('/api/platform/billing'),
+  loadBilling: async () => {
+    const billing = await request<PlatformBilling>('/api/platform/billing')
+    set({ user: billing })
+    return billing
+  },
   listUsers: (search = '') => request(`/api/platform/admin/users?search=${encodeURIComponent(search)}`),
   updateUserAccess: (id, changes) => request(`/api/platform/admin/users/${id}`, {
     method: 'PATCH',
@@ -321,6 +403,30 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
   deleteProduct: (id) => request(`/api/platform/admin/products/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   }),
+  loadAgentModels: async () => {
+    const result = readAgentModelList(await request<AgentModelList | PlatformAgentModel[]>('/api/platform/agent-models'))
+    set({ agentModels: result.models, defaultAgentModel: result.defaultModel })
+    return result.models
+  },
+  listAgentModels: async () => {
+    const result = readAgentModelList(await request<AgentModelList | PlatformAgentModel[]>('/api/platform/admin/agent-models'))
+    return result.models
+  },
+  refreshAgentModels: async () => {
+    const result = readAgentModelList(await request<AgentModelList | PlatformAgentModel[]>('/api/platform/admin/agent-models/refresh', {
+      method: 'POST',
+    }))
+    await get().loadAgentModels()
+    return result.models
+  },
+  saveAgentModel: async (id, changes) => {
+    const model = await request<PlatformAgentModel>(`/api/platform/admin/agent-models/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    })
+    await get().loadAgentModels()
+    return model
+  },
   redeemCode: (code) => request('/api/platform/redeem', {
     method: 'POST',
     body: JSON.stringify({ code }),

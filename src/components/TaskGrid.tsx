@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, useEffect } from 'react'
 import { ALL_FAVORITES_COLLECTION_ID, getTaskFavoriteCollectionIds, useStore, reuseConfig, editOutputs, removeTask, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
 import TaskCard from './TaskCard'
 
-export default function TaskGrid() {
+export default function TaskGrid({ scope = 'library' }: { scope?: 'create' | 'library' }) {
   const tasks = useStore((s) => s.tasks)
   const searchQuery = useStore((s) => s.searchQuery)
   const filterStatus = useStore((s) => s.filterStatus)
@@ -31,6 +31,11 @@ export default function TaskGrid() {
 
   const filteredTasks = useMemo(() => {
     const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
+    if (scope === 'create') {
+      const running = sorted.filter((task) => task.status === 'running')
+      const recent = sorted.filter((task) => task.status !== 'running')
+      return [...running, ...recent].slice(0, 8)
+    }
     const q = searchQuery.trim().toLowerCase()
     
     return sorted.filter((t) => {
@@ -41,7 +46,7 @@ export default function TaskGrid() {
       if (!taskMatchesFilterStatus(t, filterStatus)) return false
       return taskMatchesSearchQuery(t, q)
     })
-  }, [tasks, searchQuery, filterStatus, filterFavorite, activeFavoriteCollectionId])
+  }, [tasks, searchQuery, filterStatus, filterFavorite, activeFavoriteCollectionId, scope])
 
   const handleDelete = (task: typeof tasks[0]) => {
     setConfirmDialog({
@@ -255,7 +260,7 @@ export default function TaskGrid() {
   if (!filteredTasks.length) {
     return (
       <div className="text-center py-20 text-ink-3">
-        {searchQuery || filterFavorite ? (
+        {scope === 'library' && (searchQuery || filterFavorite) ? (
           <p className="text-sm">没有找到匹配的任务</p>
         ) : (
           <>
@@ -272,7 +277,8 @@ export default function TaskGrid() {
                 d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
               />
             </svg>
-            <p className="text-sm">输入提示词开始生成图片</p>
+            <p className="text-sm font-medium text-ink-2">{scope === 'create' ? '描述你的想象，第一张作品会出现在这里' : '资产库还没有内容'}</p>
+            <p className="mt-2 text-xs text-ink-3">支持 1K、2K、4K 输出与参考图编辑</p>
           </>
         )}
       </div>
@@ -285,7 +291,7 @@ export default function TaskGrid() {
       data-task-grid-root
       className="relative min-h-[50vh]"
     >
-      <div ref={gridRef} className="gi-masonry pb-10">
+      <div ref={gridRef} className="kunai-ui-masonry pb-10">
         {filteredTasks.map((task) => (
           <div key={task.id} className="task-card-wrapper mb-4 break-inside-avoid" data-task-id={task.id}>
             <TaskCard

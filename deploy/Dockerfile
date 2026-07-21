@@ -2,7 +2,7 @@ ARG IMAGE_MODEL=gpt-image-2
 ARG AGENT_MODEL=gpt-5.5
 
 # ---- Build stage ----
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS build
+FROM node:22-bookworm-slim AS build
 
 ARG IMAGE_MODEL
 ARG AGENT_MODEL
@@ -31,7 +31,6 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=8080
-ENV PLATFORM_DB_PATH=/app/data/image-studio.sqlite
 ENV PLATFORM_RESULT_DIR=/app/data/results
 ENV PLATFORM_IMAGE_MODEL=$IMAGE_MODEL
 ENV PLATFORM_AGENT_MODEL=$AGENT_MODEL

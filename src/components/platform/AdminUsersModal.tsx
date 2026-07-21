@@ -9,7 +9,8 @@ type GrantMode = 'membership' | 'credits'
 
 interface AdminUsersModalProps {
   onClose: () => void
-  returnFocusRef: RefObject<HTMLElement | null>
+  returnFocusRef?: RefObject<HTMLElement | null>
+  embedded?: boolean
 }
 
 export default function AdminUsersModal(props: AdminUsersModalProps) {
@@ -56,9 +57,12 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    dialogRef.current?.focus()
+    if (!props.embedded) {
+      document.body.style.overflow = 'hidden'
+      dialogRef.current?.focus()
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (props.embedded) return
       if (event.key === 'Escape') {
         props.onClose()
         return
@@ -79,11 +83,11 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => {
-      document.body.style.overflow = previousOverflow
+      if (!props.embedded) document.body.style.overflow = previousOverflow
       document.removeEventListener('keydown', handleKeyDown)
-      props.returnFocusRef.current?.focus()
+      props.returnFocusRef?.current?.focus()
     }
-  }, [props.onClose, props.returnFocusRef])
+  }, [props.embedded, props.onClose, props.returnFocusRef])
 
   const updateUser = async (user: PlatformUser, changes: { role?: number; status?: number; group?: string }) => {
     setSavingId(user.id)
@@ -154,8 +158,8 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-[rgba(12,11,9,0.55)] p-3 backdrop-blur-sm animate-overlay-in" onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
-      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="admin-users-title" tabIndex={-1} className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-5xl flex-col overflow-hidden rounded-[22px] border border-line2 bg-surface shadow-lift outline-none animate-modal-in">
+    <div className={props.embedded ? 'kunai-embedded-modal' : 'fixed inset-0 z-[95] flex items-center justify-center bg-[rgba(5,8,24,0.72)] p-3 backdrop-blur-sm animate-overlay-in'} onMouseDown={(event) => !props.embedded && event.target === event.currentTarget && props.onClose()}>
+      <section ref={dialogRef} role={props.embedded ? 'region' : 'dialog'} aria-modal={props.embedded ? undefined : true} aria-labelledby="admin-users-title" tabIndex={-1} className={props.embedded ? 'flex min-h-[560px] w-full flex-col overflow-hidden rounded-[22px] border border-line2 bg-surface shadow-card outline-none' : 'flex max-h-[calc(100dvh-1.5rem)] w-full max-w-5xl flex-col overflow-hidden rounded-[22px] border border-line2 bg-surface shadow-lift outline-none animate-modal-in'}>
         <header className="flex shrink-0 items-start justify-between border-b border-line px-5 py-4 sm:px-6 sm:py-5">
           <div>
             <h2 id="admin-users-title" className="flex items-center gap-2 font-display text-lg font-semibold text-ink"><Shield className="h-5 w-5 text-accent" />用户与权限</h2>
@@ -261,7 +265,7 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
               <div className="mt-1 text-xs text-ink-3">当前 {formatPlatformQuota(Math.max(0, balanceTarget.quota - (balanceTarget.reserved_quota || 0)), status)}</div>
             </div>
             <label className="space-y-1">
-              <span className="text-xs text-ink-3">调整金额（USD）</span>
+              <span className="text-xs text-ink-3">调整对话余额（人民币）</span>
               <input required value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="10 或 -5" inputMode="decimal" className="h-9 w-full rounded-[11px] border border-line bg-surface px-3 font-mono text-sm text-ink outline-none transition focus:border-accent focus:ring-[3px] focus:ring-accent-soft placeholder:text-ink-3" />
             </label>
             <label className="space-y-1">

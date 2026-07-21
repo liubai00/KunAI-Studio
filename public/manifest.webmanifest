@@ -1,12 +1,12 @@
 {
-  "name": "GPT Image Playground",
-  "short_name": "GPT Image",
-  "description": "GPT Image Playground 图像生成工作台",
+  "name": "KunAI Studio",
+  "short_name": "KunAI",
+  "description": "KunAI Studio AI 视觉创作与智能 Agent 工作台",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#030712",
-  "theme_color": "#111827",
+  "background_color": "#070b18",
+  "theme_color": "#070b18",
   "icons": [
     {
       "src": "./pwa-icon.svg",

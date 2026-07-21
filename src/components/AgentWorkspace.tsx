@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState, useRef, useCallback, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AgentConversation, AgentMessage, AgentRound, ResponsesOutputItem, TaskRecord } from '../types'
-import { deleteAgentRoundFromConversation, editOutputs, getActiveAgentRounds, getAgentBranchLeafId, getAgentRoundTaskIds, getAgentSiblingRounds, getCachedImage, ensureImageCached, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeMultipleTasks, removeTask, reuseConfig, useStore } from '../store'
+import { deleteAgentRoundFromConversation, editOutputs, getActiveAgentRounds, getAgentBranchLeafId, getAgentRoundTaskIds, getAgentSiblingRounds, getCachedImage, ensureImageCached, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeMultipleTasks, removeTask, reuseConfig, syncPlatformAgentBillingRounds, useStore } from '../store'
 import { getPromptMentionParts } from '../lib/promptImageMentions'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import { collectWebSearchCalls, getAgentRoundOutputItems, getWebSearchStatusForCalls, type AgentWebSearchStatus } from '../lib/agentWebSearch'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
+import { isPlatformModeEnabled } from '../lib/platformMode'
+import { usePlatformStore } from '../platformStore'
 import { downloadImageEntriesAsZip, downloadImageIds, getImageZipEntries } from '../lib/downloadImages'
 import TaskCard from './TaskCard'
 import MarkdownRenderer from './MarkdownRenderer'
@@ -77,6 +79,10 @@ const AGENT_STOPPED_MESSAGE = '已停止生成。'
 
 function formatTime(value: number) {
   return new Date(value).toLocaleString()
+}
+
+function formatCnyMicros(value: number) {
+  return `¥${(value / 1000000).toFixed(value > 0 && value < 10000 ? 4 : 2)}`
 }
 
 function AgentWebSearchInlineStatus({ status }: { status: AgentWebSearchStatus }) {
@@ -178,6 +184,29 @@ function getAgentAssistantBlocks(round: AgentRound | null, taskSlots: AgentRound
     }
 
     flushWebSearchGroup()
+
+    if (item.type === 'function_call' && item.name === 'search_web') {
+      const output = item.call_id ? outputItems.find((candidate) => candidate.type === 'function_call_output' && candidate.call_id === item.call_id) : undefined
+      const failed = (() => {
+        if (typeof output?.output !== 'string') return false
+        try {
+          return JSON.parse(output.output)?.ok === false
+        } catch {
+          return false
+        }
+      })()
+      const completed = Boolean(output)
+      blocks.push({
+        type: 'web-search',
+        status: roundInterrupted && !completed
+          ? { text: '已停止网络搜索', completed: true }
+          : { text: failed ? '网络搜索失败' : completed ? '已完成网络搜索' : '正在网络搜索', completed },
+        key: `search-web:${item.call_id ?? item.id ?? blocks.length}`,
+      })
+      continue
+    }
+
+    if (item.type === 'function_call_output') continue
 
     const imageTask = getImageTaskForOutputItem(item, tasksForRound)
     if (imageTask && !renderedTaskIds.has(imageTask.id)) {
@@ -300,6 +329,10 @@ export default function AgentWorkspace() {
   const showToast = useStore((s) => s.showToast)
   const openFavoritePicker = useStore((s) => s.openFavoritePicker)
   const agentGeneratingTitleIds = useStore((s) => s.agentGeneratingTitleIds)
+  const setAgentConversationOptions = useStore((s) => s.setAgentConversationOptions)
+  const platformAgentModels = usePlatformStore((s) => s.agentModels)
+  const defaultAgentModel = usePlatformStore((s) => s.defaultAgentModel)
+  const loadAgentModels = usePlatformStore((s) => s.loadAgentModels)
   const conversation = conversations.find((item) => item.id === activeConversationId) ?? null
   const [editingConversationTitle, setEditingConversationTitle] = useState('')
 
@@ -470,6 +503,21 @@ export default function AgentWorkspace() {
       }
     }
   }, [appMode, conversationsLoaded, conversations, conversation, createConversation, setActiveConversationId])
+
+  useEffect(() => {
+    if (!isPlatformModeEnabled() || appMode !== 'agent' || platformAgentModels.length > 0) return
+    void loadAgentModels().catch(() => undefined)
+  }, [appMode, loadAgentModels, platformAgentModels.length])
+
+  useEffect(() => {
+    if (!isPlatformModeEnabled() || !conversation || conversation.modelId || !defaultAgentModel) return
+    setAgentConversationOptions(conversation.id, { modelId: defaultAgentModel })
+  }, [conversation, defaultAgentModel, setAgentConversationOptions])
+
+  useEffect(() => {
+    if (!isPlatformModeEnabled() || !conversation) return
+    void syncPlatformAgentBillingRounds(conversation.id)
+  }, [conversation?.id])
 
   const sortedConversations = useMemo(
     () => [...conversations].sort((a, b) => b.updatedAt - a.updatedAt),
@@ -946,7 +994,7 @@ export default function AgentWorkspace() {
           {!conversation ? (
             <div className="py-20 text-center text-ink-3">
               <p className="mb-3">还没有 Agent 对话</p>
-              <button type="button" onClick={createConversation} className="rounded-lg bg-[linear-gradient(150deg,var(--accent),#e07a1f)] px-4 py-2 text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition-all hover:brightness-105">创建对话</button>
+              <button type="button" onClick={createConversation} className="rounded-lg bg-[linear-gradient(150deg,var(--accent),#0891b2)] px-4 py-2 text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition-all hover:brightness-105">创建对话</button>
             </div>
           ) : (
             (() => {
@@ -1086,6 +1134,22 @@ export default function AgentWorkspace() {
                           <MarkdownRenderer content={parts[0]?.text ?? ''} />
                         )}
                       </div>
+                    )}
+
+                    {isAssistant && round?.billing && round.billing.totalMicros > 0 && (
+                      <details className="mt-3 border-t border-line pt-2 text-xs text-ink-3">
+                        <summary className="cursor-pointer select-none font-medium hover:text-ink-2">
+                          本轮对话费用 {formatCnyMicros(round.billing.totalMicros)}
+                        </summary>
+                        <div className="mt-2 grid gap-1 font-mono text-[11px]">
+                          {round.billing.model && <span>模型：{round.billing.model}</span>}
+                          <span>输入：{round.billing.inputTokens} tokens（缓存 {round.billing.cachedInputTokens}）</span>
+                          <span>输出：{round.billing.outputTokens} tokens</span>
+                          <span>模型调用：{formatCnyMicros(round.billing.textChargeMicros)}</span>
+                          {round.billing.searchCalls > 0 && <span>联网搜索：{round.billing.searchCalls} 次 / {formatCnyMicros(round.billing.searchChargeMicros)}</span>}
+                          {(round.billing.imageCount || 0) > 0 && <span>生图：{round.billing.imageCount} 张 / 扣减 {round.billing.imageCreditsUsed || 0} 次</span>}
+                        </div>
+                      </details>
                     )}
 
                       </article>

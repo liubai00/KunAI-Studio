@@ -28,7 +28,7 @@ function loadTurnstile() {
     let timer = 0
     const fail = () => {
       window.clearTimeout(timer)
-      document.querySelector<HTMLScriptElement>('script[data-image-studio-turnstile]')?.remove()
+      document.querySelector<HTMLScriptElement>('script[data-kunai-studio-turnstile]')?.remove()
       scriptPromise = null
       reject(new Error('人机验证加载失败'))
     }
@@ -40,7 +40,7 @@ function loadTurnstile() {
       }
       resolve()
     }
-    const existing = document.querySelector<HTMLScriptElement>('script[data-image-studio-turnstile]')
+    const existing = document.querySelector<HTMLScriptElement>('script[data-kunai-studio-turnstile]')
     if (existing) {
       existing.addEventListener('load', loaded, { once: true })
       existing.addEventListener('error', fail, { once: true })
@@ -52,7 +52,7 @@ function loadTurnstile() {
     script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
     script.async = true
     script.defer = true
-    script.dataset.imageStudioTurnstile = 'true'
+    script.dataset.kunaiStudioTurnstile = 'true'
     script.onload = loaded
     script.onerror = fail
     timer = window.setTimeout(fail, 10000)

@@ -880,7 +880,7 @@ export default function MaskEditorModal() {
       </div>
 
       {/* Workspace */}
-      <div ref={stageRef} className="flex-1 relative flex items-center justify-center overflow-hidden gi-checkerboard p-0 pb-[76px] sm:p-6 sm:pb-[100px]" style={{ containerType: 'size' }}>
+      <div ref={stageRef} className="flex-1 relative flex items-center justify-center overflow-hidden kunai-ui-checkerboard p-0 pb-[76px] sm:p-6 sm:pb-[100px]" style={{ containerType: 'size' }}>
         {isLoading && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-surface/60 text-sm text-ink-2 backdrop-blur-sm">
             正在载入图片...

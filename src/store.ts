@@ -42,7 +42,7 @@ import {
   storeImageWithSize,
 } from './lib/db'
 import { callImageApi } from './lib/api'
-import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, parseBatchImageCallArguments, type AgentApiResultImage } from './lib/agentApi'
+import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, callPlatformSearchWeb, finishPlatformAgentRound, isPlatformAgentCallFailedError, parseBatchImageCallArguments, type AgentApiResultImage, type PlatformSearchWebInput } from './lib/agentApi'
 import { collectAgentRoundOutputImageSlots, extractAgentReferenceIds, getAgentCurrentReferenceId, getAgentGeneratedImageReferenceId, replaceAgentPromptImageReferencesForApi } from './lib/agentImageReferences'
 import { showBrowserNotification } from './lib/browserNotification'
 import { IMAGE_FETCH_CORS_HINT } from './lib/imageApiShared'
@@ -57,6 +57,7 @@ import { formatExportFileTime } from './lib/exportFileName'
 import { buildExportZip, readExportZip, readExportZipFileAsDataUrl } from './lib/exportZip'
 import { createUserScopedStorage } from './lib/userStorage'
 import { createPlatformSettings, isPlatformModeEnabled, PLATFORM_IMAGE_PROFILE_ID } from './lib/platformMode'
+import { usePlatformStore } from './platformStore'
 
 export const ALL_FAVORITES_COLLECTION_ID = '__all_favorites__'
 export const DEFAULT_FAVORITE_COLLECTION_ID = '__default_favorites__'
@@ -74,6 +75,8 @@ let thumbnailBackfillScheduled = false
 const MAX_IMAGE_CACHE_ENTRIES = 8
 const MAX_THUMBNAIL_CACHE_ENTRIES = 80
 const MAX_THUMBNAIL_BACKFILL_CONCURRENT = 4
+const MAX_AGENT_CONTEXT_FALLBACK_DATA_URL_LENGTH = 256 * 1024
+const MAX_AGENT_CONTEXT_IMAGE_DATA_URL_LENGTH = 2 * 1024 * 1024
 const FAL_RECOVERY_POLL_MS = 10_000
 const CUSTOM_RECOVERY_POLL_MS = 10_000
 const SUPPORT_PROMPT_IMAGE_THRESHOLD = 50
@@ -400,6 +403,23 @@ function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
+function normalizeAgentRoundBilling(value: unknown) {
+  if (!value || typeof value !== 'object') return undefined
+  const billing = value as Record<string, unknown>
+  const count = (key: string) => Math.max(0, Math.trunc(Number(billing[key]) || 0))
+  return {
+    ...(typeof billing.model === 'string' ? { model: billing.model } : {}),
+    inputTokens: count('inputTokens'),
+    cachedInputTokens: count('cachedInputTokens'),
+    outputTokens: count('outputTokens'),
+    textChargeMicros: count('textChargeMicros'),
+    searchChargeMicros: count('searchChargeMicros'),
+    searchCalls: count('searchCalls'),
+    totalMicros: count('totalMicros'),
+    currency: 'CNY' as const,
+  }
+}
+
 function normalizeAgentRound(value: unknown, fallbackIndex: number): AgentRound | null {
   if (!value || typeof value !== 'object') return null
   const round = value as Partial<AgentRound>
@@ -425,6 +445,12 @@ function normalizeAgentRound(value: unknown, fallbackIndex: number): AgentRound 
     outputTaskIds: normalizeStringArray(round.outputTaskIds),
     ...(typeof round.responseId === 'string' ? { responseId: round.responseId } : {}),
     ...(Array.isArray(round.responseOutput) ? { responseOutput: round.responseOutput } : {}),
+    ...(Number.isSafeInteger(round.responseOutputPendingFrom) && Number(round.responseOutputPendingFrom) >= 0
+      ? { responseOutputPendingFrom: Number(round.responseOutputPendingFrom) }
+      : {}),
+    requestAttemptId: typeof round.requestAttemptId === 'string' && round.requestAttemptId ? round.requestAttemptId : round.id,
+    responseSteps: Math.max(0, Math.trunc(Number(round.responseSteps) || 0)),
+    ...(normalizeAgentRoundBilling(round.billing) ? { billing: normalizeAgentRoundBilling(round.billing) } : {}),
     status,
     error: status === 'error'
       ? typeof round.error === 'string' ? round.error : '上次请求已中断'
@@ -480,6 +506,8 @@ function normalizeAgentConversations(value: unknown): AgentConversation[] {
       return {
         id: conversation.id,
         title: typeof conversation.title === 'string' && conversation.title.trim() ? conversation.title : '新对话',
+        ...(typeof conversation.modelId === 'string' && conversation.modelId ? { modelId: conversation.modelId } : {}),
+        searchEnabled: typeof conversation.searchEnabled === 'boolean' ? conversation.searchEnabled : true,
         activeRoundId: typeof conversation.activeRoundId === 'string' && roundIds.has(conversation.activeRoundId) ? conversation.activeRoundId : rounds[rounds.length - 1]?.id ?? null,
         createdAt: typeof conversation.createdAt === 'number' ? conversation.createdAt : Date.now(),
         updatedAt: typeof conversation.updatedAt === 'number' ? conversation.updatedAt : Date.now(),
@@ -637,9 +665,12 @@ function resolveDefaultFavoriteCollectionId(collections: FavoriteCollection[], p
 }
 
 function createAgentConversation(now = Date.now()): AgentConversation {
+  const defaultModel = isPlatformModeEnabled() ? usePlatformStore.getState().defaultAgentModel : null
   return {
     id: genId(),
     title: '新对话',
+    ...(defaultModel ? { modelId: defaultModel } : {}),
+    searchEnabled: true,
     activeRoundId: null,
     createdAt: now,
     updatedAt: now,
@@ -836,6 +867,7 @@ interface AppState {
   setActiveAgentConversationId: (id: string | null) => void
   setActiveAgentRoundId: (conversationId: string, roundId: string | null) => void
   renameAgentConversation: (id: string, title: string) => void
+  setAgentConversationOptions: (id: string, options: { modelId?: string; searchEnabled?: boolean }) => void
   deleteAgentConversation: (id: string) => void
   setAgentSidebarCollapsed: (collapsed: boolean) => void
   setAgentAssetTab: (tab: 'references' | 'outputs') => void
@@ -1460,6 +1492,13 @@ export const useStore = create<AppState>()(
         ),
       })),
       renameAgentConversation: (id, title) => set((state) => ({ agentConversations: state.agentConversations.map((c) => (c.id === id ? { ...c, title, updatedAt: Date.now() } : c)) })),
+      setAgentConversationOptions: (id, options) => set((state) => ({
+        agentConversations: state.agentConversations.map((conversation) => {
+          if (conversation.id !== id) return conversation
+          if (options.modelId !== undefined && conversation.rounds.length > 0 && conversation.modelId && options.modelId !== conversation.modelId) return conversation
+          return { ...conversation, ...options, updatedAt: Date.now() }
+        }),
+      })),
       deleteAgentConversation: (id) => set((state) => {
         const agentInputDrafts = { ...state.agentInputDrafts }
         delete agentInputDrafts[id]
@@ -1623,7 +1662,7 @@ export const useStore = create<AppState>()(
       },
     }),
     {
-      name: 'gpt-image-playground',
+      name: 'kunai-studio',
       version: 2,
       storage: createJSONStorage(() => createUserScopedStorage()),
       migrate: (persistedState) => migratePersistedState(persistedState),
@@ -1734,6 +1773,13 @@ export function markInterruptedOpenAIRunningTasks(tasks: TaskRecord[], now = Dat
   })
 
   return { tasks: updatedTasks, interruptedTasks }
+}
+
+function isUnsubmittedInterruptedPlatformTask(task: TaskRecord) {
+  return task.apiProfileId === PLATFORM_IMAGE_PROFILE_ID &&
+    task.status === 'error' &&
+    task.error === OPENAI_INTERRUPTED_ERROR &&
+    !task.platformRequestIds?.length
 }
 
 function clearOpenAIWatchdogTimer(taskId: string) {
@@ -2632,18 +2678,26 @@ async function generateAgentConversationTitle(
   requestSettings: AppSettings,
   activeProfile: ApiProfile,
   fallbackTitle: string,
+  roundId: string,
 ) {
   useStore.setState((state) => {
     const next = { ...state.agentGeneratingTitleIds, [conversationId]: true as const }
     return { agentGeneratingTitleIds: next }
   })
   try {
-    const imageDataUrls = await readAgentImageDataUrls(inputImageIds)
+    const imageDataUrls = await readAgentImageDataUrls(inputImageIds, { remaining: MAX_AGENT_CONTEXT_IMAGE_DATA_URL_LENGTH })
     const title = await callAgentConversationTitleApi({
       settings: requestSettings,
       profile: activeProfile,
       prompt,
       imageDataUrls,
+      ...(isPlatformModeEnabled() ? {
+        context: {
+          conversationId,
+          roundId,
+          stepKey: `${roundId}-title`,
+        },
+      } : {}),
     })
     if (!title || title === fallbackTitle) return
 
@@ -2944,59 +2998,134 @@ async function persistTaskStreamPartialImage(taskId: string, dataUrl: string) {
   }
 }
 
-async function readAgentImageDataUrls(ids: string[]) {
+type AgentContextImageBudget = { remaining: number }
+
+function getAgentContextImageDataUrlLength(value: unknown): number {
+  if (Array.isArray(value)) return value.reduce((total, item) => total + getAgentContextImageDataUrlLength(item), 0)
+  if (!isRecord(value)) return 0
+  return Object.entries(value).reduce((total, [key, item]) => {
+    if (key === 'image_url' && typeof item === 'string' && item.startsWith('data:')) return total + item.length
+    return total + getAgentContextImageDataUrlLength(item)
+  }, 0)
+}
+
+function createAgentContextImageBudget(input: unknown[] = []): AgentContextImageBudget {
+  return {
+    remaining: Math.max(0, MAX_AGENT_CONTEXT_IMAGE_DATA_URL_LENGTH - getAgentContextImageDataUrlLength(input)),
+  }
+}
+
+async function readAgentImageDataUrls(ids: string[], budget?: AgentContextImageBudget) {
   const dataUrls: string[] = []
   for (const id of ids) {
-    const dataUrl = await ensureImageCached(id)
+    const dataUrl = await readAgentContextImageDataUrl(id, budget)
     if (dataUrl) dataUrls.push(dataUrl)
   }
   return dataUrls
 }
 
-async function createAgentUserInputItem(conversation: AgentConversation, round: AgentRound, message: AgentMessage, tasks: TaskRecord[]) {
-  const imageDataUrls = await readAgentImageDataUrls(round.inputImageIds)
+async function readAgentContextImageDataUrl(id: string, budget?: AgentContextImageBudget) {
+  const cached = getCachedThumbnail(id)
+  if (cached) {
+    if (budget && cached.dataUrl.length > budget.remaining) return undefined
+    if (budget) budget.remaining -= cached.dataUrl.length
+    return cached.dataUrl
+  }
+  const thumbnail = await getImageThumbnail(id)
+  if (thumbnail?.thumbnailDataUrl) {
+    cacheThumbnail(id, {
+      dataUrl: thumbnail.thumbnailDataUrl,
+      width: thumbnail.width,
+      height: thumbnail.height,
+      thumbnailVersion: thumbnail.thumbnailVersion,
+    })
+    if (budget && thumbnail.thumbnailDataUrl.length > budget.remaining) return undefined
+    if (budget) budget.remaining -= thumbnail.thumbnailDataUrl.length
+    return thumbnail.thumbnailDataUrl
+  }
+  const dataUrl = await ensureImageCached(id)
+  if (!dataUrl) return undefined
+  if (budget && dataUrl.length > budget.remaining) return undefined
+  if (dataUrl.length > MAX_AGENT_CONTEXT_FALLBACK_DATA_URL_LENGTH) {
+    throw new Error('历史图片过大且无法生成上下文缩略图，请重新上传图片后再试')
+  }
+  if (budget) budget.remaining -= dataUrl.length
+  return dataUrl
+}
+
+async function createAgentUserInputItem(conversation: AgentConversation, round: AgentRound, message: AgentMessage, tasks: TaskRecord[], budget?: AgentContextImageBudget) {
   const rounds = getAgentRoundPath(conversation, round.id)
   const text = replaceAgentPromptImageReferencesForApi(message.content, round, rounds, tasks)
-  const referenceText = round.inputImageIds.length > 0
-    ? `\n\n<available_refs>${round.inputImageIds.map((_, index) => `\n  <ref id="${getAgentCurrentReferenceId(round, index)}" />`).join('')}\n</available_refs>`
-    : ''
+  const slots = round.inputImageIds.map((imageId, index) => {
+    const refId = getAgentCurrentReferenceId(round, index)
+    return {
+      imageId,
+      refText: `<ref id="${refId}" />`,
+      omittedRefText: `<ref id="${refId}" image_omitted="context_budget" />`,
+    }
+  })
   return {
     role: 'user',
     content: [
-      { type: 'input_text', text: `${text}${referenceText}` },
-      ...imageDataUrls.map((dataUrl) => ({ type: 'input_image', image_url: dataUrl })),
+      { type: 'input_text', text },
+      ...(await createAgentContextImageContent(slots, budget)),
     ],
   }
 }
 
-async function createAgentGeneratedImagesInputItem(round: AgentRound, tasks: TaskRecord[]) {
-  const contentParts: Array<{ type: string; text?: string; image_url?: string }> = []
+type AgentContextImageSlot = {
+  imageId?: string
+  refText: string
+  omittedRefText?: string
+}
+
+async function createAgentContextImageContent(slots: AgentContextImageSlot[], budget?: AgentContextImageBudget) {
+  const selected = new Map<number, string>()
+  for (let index = slots.length - 1; index >= 0; index -= 1) {
+    const imageId = slots[index].imageId
+    if (!imageId) continue
+    const dataUrl = await readAgentContextImageDataUrl(imageId, budget)
+    if (dataUrl) selected.set(index, dataUrl)
+  }
+  return slots.flatMap((slot, index) => {
+    const dataUrl = selected.get(index)
+    return [
+      ...(dataUrl ? [{ type: 'input_image', image_url: dataUrl }] : []),
+      { type: 'input_text', text: dataUrl ? slot.refText : slot.omittedRefText ?? slot.refText },
+    ]
+  })
+}
+
+async function createAgentGeneratedImagesInputItem(round: AgentRound, tasks: TaskRecord[], budget?: AgentContextImageBudget) {
+  const slots: AgentContextImageSlot[] = []
   let imageIndex = 0
   for (const taskId of round.outputTaskIds) {
     const task = tasks.find((item) => item.id === taskId)
     if (!task) {
-      contentParts.push({ type: 'input_text', text: `<removed_ref id="${getAgentGeneratedImageReferenceId(round, imageIndex)}" />` })
+      const removedRefText = `<removed_ref id="${getAgentGeneratedImageReferenceId(round, imageIndex)}" />`
+      slots.push({ refText: removedRefText, omittedRefText: removedRefText })
       imageIndex += 1
       continue
     }
     for (const imageId of task.outputImages) {
-      const dataUrl = await ensureImageCached(imageId)
-      if (dataUrl) {
-        contentParts.push({ type: 'input_image', image_url: dataUrl })
-      }
       const refId = getAgentGeneratedImageReferenceId(round, imageIndex)
       const prompt = truncateAgentReferencePrompt(task.prompt || '')
       const promptAttribute = prompt ? ` prompt="${escapeXmlAttribute(prompt)}"` : ''
-      contentParts.push({ type: 'input_text', text: `<ref id="${refId}"${promptAttribute} />` })
+      slots.push({
+        imageId,
+        refText: `<ref id="${refId}"${promptAttribute} />`,
+        omittedRefText: `<ref id="${refId}" image_omitted="context_budget"${promptAttribute} />`,
+      })
       imageIndex += 1
     }
   }
+  const contentParts = await createAgentContextImageContent(slots, budget)
   if (contentParts.length === 0) return null
   return { role: 'user', content: contentParts }
 }
 
-async function createAgentBatchImagesInputItem(round: AgentRound, tasks: TaskRecord[], batchTaskIds: string[]) {
-  const contentParts: Array<{ type: string; text?: string; image_url?: string }> = []
+async function createAgentBatchImagesInputItem(round: AgentRound, tasks: TaskRecord[], batchTaskIds: string[], budget?: AgentContextImageBudget) {
+  const slots: AgentContextImageSlot[] = []
   // Count existing images in the round to compute correct imageIndex offset
   let baseImageIndex = 0
   for (const taskId of round.outputTaskIds) {
@@ -3009,17 +3138,18 @@ async function createAgentBatchImagesInputItem(round: AgentRound, tasks: TaskRec
     const task = tasks.find((item) => item.id === taskId)
     if (!task || task.status !== 'done') continue
     for (const imgId of task.outputImages) {
-      const dataUrl = await ensureImageCached(imgId)
-      if (dataUrl) {
-        contentParts.push({ type: 'input_image', image_url: dataUrl })
-      }
       const refId = getAgentGeneratedImageReferenceId(round, imageIndex)
       const prompt = truncateAgentReferencePrompt(task.prompt || '')
       const promptAttribute = prompt ? ` prompt="${escapeXmlAttribute(prompt)}"` : ''
-      contentParts.push({ type: 'input_text', text: `<ref id="${refId}"${promptAttribute} />` })
+      slots.push({
+        imageId: imgId,
+        refText: `<ref id="${refId}"${promptAttribute} />`,
+        omittedRefText: `<ref id="${refId}" image_omitted="context_budget"${promptAttribute} />`,
+      })
       imageIndex += 1
     }
   }
+  const contentParts = await createAgentContextImageContent(slots, budget)
   if (contentParts.length === 0) return null
   return { role: 'user', content: contentParts }
 }
@@ -3192,8 +3322,110 @@ function mergeResponseOutputItems(previous: ResponsesOutputItem[], next: Respons
   return merged
 }
 
+function getAgentResponseOutputText(output: ResponsesOutputItem[]) {
+  return output
+    .filter((item) => item.type === 'message')
+    .flatMap((item) => item.content ?? [])
+    .map((part) => typeof part.text === 'string' ? part.text.trim() : '')
+    .filter(Boolean)
+    .join('\n\n')
+}
+
 function countResponseToolCalls(output: ResponsesOutputItem[]) {
   return output.filter((item) => item.type === 'image_generation_call').length
+}
+
+function getAgentTextBilling(value: unknown) {
+  if (!value || typeof value !== 'object') return null
+  const billing = value as Record<string, unknown>
+  const count = (key: string) => Math.max(0, Math.trunc(Number(billing[key]) || 0))
+  if (billing.currency !== 'CNY') return null
+  return {
+    model: typeof billing.model === 'string' ? billing.model : undefined,
+    inputTokens: count('input_tokens'),
+    cachedInputTokens: count('cached_input_tokens'),
+    outputTokens: count('output_tokens'),
+    chargeMicros: count('charge_micros'),
+  }
+}
+
+function addAgentRoundBilling(conversationId: string, roundId: string, input: {
+  model?: string
+  inputTokens?: number
+  cachedInputTokens?: number
+  outputTokens?: number
+  textChargeMicros?: number
+  searchChargeMicros?: number
+  searchCalls?: number
+}) {
+  updateAgentConversation(conversationId, (conversation) => ({
+    ...conversation,
+    rounds: conversation.rounds.map((round) => {
+      if (round.id !== roundId) return round
+      const billing = round.billing ?? {
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        textChargeMicros: 0,
+        searchChargeMicros: 0,
+        searchCalls: 0,
+        totalMicros: 0,
+        currency: 'CNY' as const,
+      }
+      const next = {
+        ...billing,
+        ...(input.model ? { model: input.model } : {}),
+        inputTokens: billing.inputTokens + (input.inputTokens || 0),
+        cachedInputTokens: billing.cachedInputTokens + (input.cachedInputTokens || 0),
+        outputTokens: billing.outputTokens + (input.outputTokens || 0),
+        textChargeMicros: billing.textChargeMicros + (input.textChargeMicros || 0),
+        searchChargeMicros: billing.searchChargeMicros + (input.searchChargeMicros || 0),
+        searchCalls: billing.searchCalls + (input.searchCalls || 0),
+      }
+      next.totalMicros = next.textChargeMicros + next.searchChargeMicros
+      return { ...round, billing: next }
+    }),
+  }))
+}
+
+export async function syncPlatformAgentBillingRounds(conversationId?: string) {
+  if (!isPlatformModeEnabled()) return
+  try {
+    const result = await usePlatformStore.getState().loadBilling()
+    const rows = Array.isArray(result.agent_rounds) ? result.agent_rounds : []
+    if (rows.length === 0) return
+    const byKey = new Map(rows.map((row) => [`${row.conversation_id}\0${row.round_id}`, row]))
+    useStore.setState((state) => ({
+      agentConversations: state.agentConversations.map((conversation) => {
+        if (conversationId && conversation.id !== conversationId) return conversation
+        return {
+          ...conversation,
+          rounds: conversation.rounds.map((round) => {
+            const row = byKey.get(`${conversation.id}\0${round.id}`)
+            if (!row) return round
+            return {
+              ...round,
+              billing: {
+                ...(round.billing?.model || conversation.modelId ? { model: round.billing?.model || conversation.modelId } : {}),
+                inputTokens: Math.max(0, Math.trunc(Number(row.input_tokens) || 0)),
+                cachedInputTokens: Math.max(0, Math.trunc(Number(row.cached_input_tokens) || 0)),
+                outputTokens: Math.max(0, Math.trunc(Number(row.output_tokens) || 0)),
+                imageCount: Math.max(0, Math.trunc(Number(row.image_count) || 0)),
+                imageCreditsUsed: Math.max(0, Math.trunc(Number(row.image_credits_used) || 0)),
+                textChargeMicros: Math.max(0, Math.trunc(Number(row.agent_micros) || 0)),
+                searchChargeMicros: Math.max(0, Math.trunc(Number(row.search_micros) || 0)),
+                searchCalls: Math.max(0, Math.trunc(Number(row.search_calls) || 0)),
+                totalMicros: Math.max(0, Math.trunc(Number(row.total_micros) || 0)),
+                currency: 'CNY' as const,
+              },
+            }
+          }),
+        }
+      }),
+    }))
+  } catch {
+    // 本地费用仅作为进行中预览，账单接口暂时不可用时不影响 Agent 回答。
+  }
 }
 
 function createAgentContinuationInputItem(newImageRefs: string[], toolCallsUsed: number, maxToolCalls: number) {
@@ -3243,12 +3475,27 @@ function getAgentRoundResponseOutput(round: AgentRound, tasks: TaskRecord[]): Re
 async function buildAgentApiInput(conversation: AgentConversation, currentRound: AgentRound, tasks: TaskRecord[]): Promise<unknown[]> {
   const input: unknown[] = []
   const rounds = getAgentRoundPath(conversation, currentRound.id)
+  const budget = createAgentContextImageBudget()
+  const userItems = new Map<string, unknown>()
+  const generatedImageItems = new Map<string, unknown>()
 
-  for (const round of rounds) {
+  // 优先保留当前轮及最近轮次的图片；超出总预算时仍保留 ref 文本。
+  for (let index = rounds.length - 1; index >= 0; index -= 1) {
+    const round = rounds[index]
     const userMessage = conversation.messages.find((message) => message.id === round.userMessageId)
     if (!userMessage) continue
+    if (round.id !== currentRound.id && round.outputTaskIds.length > 0) {
+      const imagesItem = await createAgentGeneratedImagesInputItem(round, tasks, budget)
+      if (imagesItem) generatedImageItems.set(round.id, imagesItem)
+    }
+    userItems.set(round.id, await createAgentUserInputItem(conversation, round, userMessage, tasks, budget))
+  }
 
-    input.push(await createAgentUserInputItem(conversation, round, userMessage, tasks))
+  for (const round of rounds) {
+    const userItem = userItems.get(round.id)
+    if (!userItem) continue
+
+    input.push(userItem)
     if (round.id === currentRound.id) continue
 
     const output = getAgentRoundResponseOutput(round, tasks)
@@ -3275,10 +3522,8 @@ async function buildAgentApiInput(conversation: AgentConversation, currentRound:
     }
 
     // Inject generated images as a separate user message with input_image parts
-    if (round.outputTaskIds.length > 0) {
-      const imagesItem = await createAgentGeneratedImagesInputItem(round, tasks)
-      if (imagesItem) input.push(imagesItem)
-    }
+    const imagesItem = generatedImageItems.get(round.id)
+    if (imagesItem) input.push(imagesItem)
   }
 
   return input
@@ -3290,8 +3535,65 @@ function getAgentFunctionOutputCallIds(output: ResponsesOutputItem[]) {
     .map((item) => item.call_id!))
 }
 
-function createAgentRecoveredToolOutputs(round: AgentRound, tasks: TaskRecord[]) {
+function getCommittedAgentResponseOutput(round: AgentRound) {
   const output = round.responseOutput ?? []
+  const pendingFrom = Number(round.responseOutputPendingFrom)
+  if (!Number.isSafeInteger(pendingFrom) || pendingFrom < 0) return output
+  return output.slice(0, Math.min(pendingFrom, output.length))
+}
+
+function getFirstUnpersistedBuiltInImageCallIndex(output: ResponsesOutputItem[], tasks: TaskRecord[], roundId: string) {
+  const taskToolCallIds = new Set(tasks
+    .filter((task) => task.agentRoundId === roundId && task.agentToolCallId)
+    .map((task) => task.agentToolCallId!))
+  return output.findIndex((item) =>
+    item.type === 'image_generation_call' &&
+    (typeof item.id !== 'string' || !item.id || !taskToolCallIds.has(item.id)),
+  )
+}
+
+function parseAgentSearchWebArguments(args: string): PlatformSearchWebInput | null {
+  try {
+    const parsed = JSON.parse(args) as Record<string, unknown>
+    if (typeof parsed.query !== 'string' || !parsed.query.trim()) return null
+    if (!['general', 'news', 'finance'].includes(String(parsed.topic))) return null
+    if (!['none', 'day', 'week', 'month', 'year'].includes(String(parsed.time_range))) return null
+    return {
+      query: parsed.query.trim(),
+      topic: parsed.topic as PlatformSearchWebInput['topic'],
+      time_range: parsed.time_range as PlatformSearchWebInput['time_range'],
+    }
+  } catch {
+    return null
+  }
+}
+
+async function executeAgentSearchWeb(conversationId: string, roundId: string, callId: string, input: PlatformSearchWebInput, signal?: AbortSignal) {
+  try {
+    const result = await callPlatformSearchWeb({ conversationId, roundId, callId, input, signal })
+    addAgentRoundBilling(conversationId, roundId, {
+      searchChargeMicros: result.billing?.charge_micros || 0,
+      searchCalls: 1,
+    })
+    return JSON.stringify({
+      ok: true,
+      query: result.query,
+      sources: result.results.map((item) => ({
+        title: item.title,
+        url: item.url,
+        snippet: item.snippet,
+      })),
+    })
+  } catch (err) {
+    return JSON.stringify({
+      ok: false,
+      error: { message: err instanceof Error ? err.message : String(err) },
+    })
+  }
+}
+
+function createAgentRecoveredToolOutputs(round: AgentRound, tasks: TaskRecord[], maxToolCalls = Number.POSITIVE_INFINITY) {
+  const output = getCommittedAgentResponseOutput(round)
   if (output.length === 0) return null
 
   const existingOutputCallIds = getAgentFunctionOutputCallIds(output)
@@ -3313,7 +3615,7 @@ function createAgentRecoveredToolOutputs(round: AgentRound, tasks: TaskRecord[])
         }
       })()
       const task = tasks.find((task) => task.agentRoundId === round.id && task.agentToolCallId === item.call_id)
-      if (!task || task.status === 'running' || task.falRecoverable || task.customRecoverable || task.platformRecoverable) {
+      if (!task || task.status === 'running' || task.falRecoverable || task.customRecoverable || task.platformRecoverable || isUnsubmittedInterruptedPlatformTask(task)) {
         hasPendingRecoverableCall = true
         continue
       }
@@ -3340,7 +3642,9 @@ function createAgentRecoveredToolOutputs(round: AgentRound, tasks: TaskRecord[])
       const batchTasks = round.outputTaskIds
         .map((taskId) => tasks.find((task) => task.id === taskId))
         .filter((task): task is TaskRecord => Boolean(task && task.agentBatchCallId === item.call_id))
-      if (batchTasks.length < batchItems.length || batchTasks.some((task) => task.status === 'running' || task.falRecoverable || task.customRecoverable || task.platformRecoverable)) {
+      const missingItemsReachedLimit = batchTasks.length < batchItems.length &&
+        getAgentRecoveredToolCallCount(output, tasks) >= maxToolCalls
+      if ((!missingItemsReachedLimit && batchTasks.length < batchItems.length) || batchTasks.some((task) => task.status === 'running' || task.falRecoverable || task.customRecoverable || task.platformRecoverable || isUnsubmittedInterruptedPlatformTask(task))) {
         hasPendingRecoverableCall = true
         continue
       }
@@ -3348,6 +3652,9 @@ function createAgentRecoveredToolOutputs(round: AgentRound, tasks: TaskRecord[])
       recoveredTaskIds.push(...batchTasks.map((task) => task.id))
       const images = batchItems.map((batchItem, index) => {
         const task = batchTasks[index]
+        if (!task && missingItemsReachedLimit) {
+          return { id: batchItem.id, status: 'error', error: 'Tool limit reached' }
+        }
         const ok = task?.status === 'done' && task.outputImages.length > 0
         if (!ok) allSuccessful = false
         return {
@@ -3368,13 +3675,14 @@ function createAgentRecoveredToolOutputs(round: AgentRound, tasks: TaskRecord[])
   return { additions, recoveredTaskIds, allSuccessful }
 }
 
-function createReadyAgentRecoveredToolState(round: AgentRound, tasks: TaskRecord[]) {
-  const recovered = createAgentRecoveredToolOutputs(round, tasks)
+function createReadyAgentRecoveredToolState(round: AgentRound, tasks: TaskRecord[], maxToolCalls: number) {
+  const recovered = createAgentRecoveredToolOutputs(round, tasks, maxToolCalls)
   if (recovered) return recovered
-  if (!round.responseOutput?.length || round.outputTaskIds.length === 0) return null
+  const responseOutput = getCommittedAgentResponseOutput(round)
+  if (!responseOutput.length || round.outputTaskIds.length === 0) return null
 
-  const outputCallIds = getAgentFunctionOutputCallIds(round.responseOutput)
-  const pendingFunctionCall = round.responseOutput.some((item) =>
+  const outputCallIds = getAgentFunctionOutputCallIds(responseOutput)
+  const pendingFunctionCall = responseOutput.some((item) =>
     item.type === 'function_call' &&
     (item.name === 'generate_image' || item.name === 'generate_image_batch') &&
     item.call_id &&
@@ -3400,31 +3708,48 @@ function appendAgentRecoveredToolOutputs(conversationId: string, roundId: string
     updatedAt: Date.now(),
     rounds: current.rounds.map((round) => {
       if (round.id !== roundId) return round
-      const output = round.responseOutput ?? []
+      const output = getCommittedAgentResponseOutput(round)
       const existingOutputCallIds = getAgentFunctionOutputCallIds(output)
       const nextAdditions = additions.filter((item) => item.call_id && !existingOutputCallIds.has(item.call_id))
       return nextAdditions.length > 0
-        ? { ...round, responseOutput: [...output, ...nextAdditions] }
-        : round
+        ? { ...round, responseOutput: [...output, ...nextAdditions], responseOutputPendingFrom: undefined }
+        : { ...round, responseOutput: output, responseOutputPendingFrom: undefined }
     }),
   }))
 }
 
 function getAgentRecoveredToolCallCount(output: ResponsesOutputItem[], tasks: TaskRecord[]) {
+  const functionCalls = new Map(output
+    .filter((item) => item.type === 'function_call' && item.call_id)
+    .map((item) => [item.call_id!, item]))
   const functionOutputs = output.filter((item) => item.type === 'function_call_output')
   const functionCallCount = functionOutputs.reduce((count, item) => {
-    if (!item.output) return count
+    const call = item.call_id ? functionCalls.get(item.call_id) : undefined
+    if (!call || !item.output) return count
     try {
-      const payload = JSON.parse(item.output) as { images?: unknown[]; status?: string }
-      if (Array.isArray(payload.images)) return count + payload.images.filter((image) => isRecord(image) && image.status === 'done').length
-      return payload.status === 'done' ? count + 1 : count
+      const payload = JSON.parse(item.output) as { images?: unknown[]; status?: string; error?: unknown; ok?: boolean }
+      if (call.name === 'generate_image_batch') {
+        if (!Array.isArray(payload.images)) return count
+        return count + payload.images.filter((image) =>
+          isRecord(image) && image.error !== 'Tool limit reached',
+        ).length
+      }
+      if (call.name === 'continue_generation') return payload.status === 'continued' ? count + 1 : count
+      if (call.name === 'generate_image') return payload.error === 'Tool limit reached' ? count : count + 1
+      if (call.name === 'search_web') {
+        const message = isRecord(payload.error) ? payload.error.message : undefined
+        return message === 'Tool limit reached' ? count : count + 1
+      }
+      return count
     } catch {
       return count
     }
   }, 0)
   const builtInCount = countResponseToolCalls(output)
-  const doneTaskCount = tasks.filter((task) => task.status === 'done').length
-  return Math.max(functionCallCount + builtInCount, doneTaskCount)
+  const attemptedTaskCount = tasks.filter((task) =>
+    Boolean(task.agentToolCallId) && !isUnsubmittedInterruptedPlatformTask(task),
+  ).length
+  return Math.max(functionCallCount + builtInCount, attemptedTaskCount)
 }
 
 function getAgentRecoveredFailureError(round: AgentRound, tasks: TaskRecord[]) {
@@ -3464,7 +3789,12 @@ async function continueRecoveredAgentRound(taskId: string) {
       }))
     }
 
-    const recovered = createReadyAgentRecoveredToolState(round, latestState.tasks)
+    const normalizedSettings = normalizeSettings(latestState.settings)
+    const configuredMaxToolCalls = Number.isFinite(normalizedSettings.agentMaxToolRounds)
+      ? Math.max(1, Math.trunc(normalizedSettings.agentMaxToolRounds))
+      : DEFAULT_AGENT_MAX_TOOL_ROUNDS
+    const maxToolCalls = isPlatformModeEnabled() ? Math.min(15, configuredMaxToolCalls) : configuredMaxToolCalls
+    const recovered = createReadyAgentRecoveredToolState(round, latestState.tasks, maxToolCalls)
     if (!recovered) return
 
     appendAgentRecoveredToolOutputs(conversation.id, round.id, recovered.additions)
@@ -3478,24 +3808,34 @@ async function continueRecoveredAgentRound(taskId: string) {
       return
     }
 
-    const normalizedSettings = normalizeSettings(updatedState.settings)
     const agentValidationError = getAgentProfileValidationError(normalizedSettings)
     if (agentValidationError) {
       failRound(`无法继续恢复任务：${agentValidationError.message}`)
       return
     }
-    const activeProfile = getAgentTextApiProfile(normalizedSettings)
+    const configuredActiveProfile = getAgentTextApiProfile(normalizedSettings)
     const imageProfile = getAgentImageApiProfile(normalizedSettings)
-    if (!activeProfile || !imageProfile) {
+    if (!configuredActiveProfile || !imageProfile) {
       failRound('Agent API 配置不存在，无法继续恢复任务。')
       return
     }
+    const selectedPlatformModel = isPlatformModeEnabled()
+      ? usePlatformStore.getState().agentModels.find((model) => model.id === conversation.modelId && model.selectable)
+      : null
+    if (isPlatformModeEnabled() && !selectedPlatformModel) {
+      failRound('当前对话锁定的 Agent 模型已不可用，无法继续恢复任务。')
+      return
+    }
+    const activeProfile = selectedPlatformModel
+      ? { ...configuredActiveProfile, model: selectedPlatformModel.id }
+      : configuredActiveProfile
+    const requestSettings = {
+      ...createSettingsForApiProfile(normalizedSettings, activeProfile),
+      ...(isPlatformModeEnabled() ? { agentWebSearch: Boolean(conversation.searchEnabled && usePlatformStore.getState().status?.image_studio?.search_configured) } : {}),
+    }
     const roundTasks = updatedState.tasks.filter((item) => item.agentRoundId === round.id)
     const resumeParams = roundTasks.find((item) => item.params)?.params
-      ?? normalizeParamsForSettings(updatedState.params, createSettingsForApiProfile(normalizedSettings, activeProfile), { hasInputImages: round.inputImageIds.length > 0 })
-    const maxToolCalls = Number.isFinite(normalizedSettings.agentMaxToolRounds)
-      ? Math.max(1, Math.trunc(normalizedSettings.agentMaxToolRounds))
-      : DEFAULT_AGENT_MAX_TOOL_ROUNDS
+      ?? normalizeParamsForSettings(updatedState.params, requestSettings, { hasInputImages: round.inputImageIds.length > 0 })
     const toolCallsUsed = getAgentRecoveredToolCallCount(updatedRound.responseOutput ?? [], roundTasks)
 
     updateAgentConversation(conversation.id, (current) => ({
@@ -3512,7 +3852,7 @@ async function continueRecoveredAgentRound(taskId: string) {
       conversation.id,
       round.id,
       resumeParams,
-      createSettingsForApiProfile(normalizedSettings, activeProfile),
+      requestSettings,
       activeProfile,
       imageProfile,
       {
@@ -3538,7 +3878,7 @@ export async function submitAgentMessage() {
     return
   }
 
-  const activeProfile = getAgentTextApiProfile(normalizedSettings)!
+  const configuredActiveProfile = getAgentTextApiProfile(normalizedSettings)!
   const imageProfile = getAgentImageApiProfile(normalizedSettings)!
 
   const trimmedPrompt = prompt.trim()
@@ -3551,6 +3891,20 @@ export async function submitAgentMessage() {
   if (conversation.rounds.some((round) => round.status === 'running')) {
     showToast('请等待生成完成，或先停止生成', 'info')
     return
+  }
+
+  const selectedPlatformModel = isPlatformModeEnabled()
+    ? usePlatformStore.getState().agentModels.find((model) => model.id === (conversation.modelId || usePlatformStore.getState().defaultAgentModel) && model.selectable)
+    : null
+  if (isPlatformModeEnabled() && !selectedPlatformModel) {
+    showToast('当前没有已启用且完成定价的 Agent 模型，请联系管理员', 'error')
+    return
+  }
+  const activeProfile = selectedPlatformModel
+    ? { ...configuredActiveProfile, model: selectedPlatformModel.id }
+    : configuredActiveProfile
+  if (selectedPlatformModel && conversation.modelId !== selectedPlatformModel.id) {
+    state.setAgentConversationOptions(conversation.id, { modelId: selectedPlatformModel.id })
   }
 
   let orderedInputImages = inputImages
@@ -3579,7 +3933,10 @@ export async function submitAgentMessage() {
     await storeImage(image.dataUrl)
   }
 
-  const requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
+  const requestSettings = {
+    ...createSettingsForApiProfile(normalizedSettings, activeProfile),
+    ...(isPlatformModeEnabled() ? { agentWebSearch: Boolean(conversation.searchEnabled && usePlatformStore.getState().status?.image_studio?.search_configured) } : {}),
+  }
   const now = Date.now()
   const editingRound = state.agentEditingRoundId
     ? conversation.rounds.find((item) => item.id === state.agentEditingRoundId) ?? null
@@ -3619,6 +3976,8 @@ export async function submitAgentMessage() {
     maskTargetImageId,
     maskImageId,
     outputTaskIds: [],
+    requestAttemptId: genId(),
+    responseSteps: 0,
     status: 'running',
     error: null,
     createdAt: now,
@@ -3668,8 +4027,8 @@ export async function submitAgentMessage() {
   state.clearMaskDraft()
   state.setAgentEditingRoundId(null)
 
-  if (fallbackTitle) {
-    void generateAgentConversationTitle(conversation.id, trimmedPrompt, inputImageIds, requestSettings, activeProfile, fallbackTitle)
+  if (fallbackTitle && !isPlatformModeEnabled()) {
+    void generateAgentConversationTitle(conversation.id, trimmedPrompt, inputImageIds, requestSettings, activeProfile, fallbackTitle, roundId)
   }
 
   void executeAgentRound(conversation.id, roundId, normalizedParams, requestSettings, activeProfile, imageProfile)
@@ -3687,7 +4046,7 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
     return
   }
 
-  const activeProfile = getAgentTextApiProfile(normalizedSettings)!
+  const configuredActiveProfile = getAgentTextApiProfile(normalizedSettings)!
   const imageProfile = getAgentImageApiProfile(normalizedSettings)!
 
   const conversation = state.agentConversations.find((item) => item.id === conversationId)
@@ -3700,13 +4059,27 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
     return
   }
 
+  const selectedPlatformModel = isPlatformModeEnabled()
+    ? usePlatformStore.getState().agentModels.find((model) => model.id === conversation.modelId && model.selectable)
+    : null
+  if (isPlatformModeEnabled() && !selectedPlatformModel) {
+    showToast('当前对话锁定的 Agent 模型已不可用，请新建对话', 'error')
+    return
+  }
+  const activeProfile = selectedPlatformModel
+    ? { ...configuredActiveProfile, model: selectedPlatformModel.id }
+    : configuredActiveProfile
+
   if (conversation.rounds.some((round) => round.status === 'running')) {
     showToast('请等待生成完成，或先停止生成', 'info')
     return
   }
 
   const inputImageIds = uniqueIds(sourceRound.inputImageIds)
-  const requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
+  const requestSettings = {
+    ...createSettingsForApiProfile(normalizedSettings, activeProfile),
+    ...(isPlatformModeEnabled() ? { agentWebSearch: Boolean(conversation.searchEnabled && usePlatformStore.getState().status?.image_studio?.search_configured) } : {}),
+  }
   const normalizedParams = {
     ...normalizeParamsForSettings(params, requestSettings, { hasInputImages: inputImageIds.length > 0 }),
     n: DEFAULT_PARAMS.n,
@@ -3716,6 +4089,34 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
   if (sourceRound.status === 'error') {
     const assistantMessageId = sourceRound.assistantMessageId
       ?? conversation.messages.find((message) => message.roundId === sourceRound.id && message.role === 'assistant')?.id
+    const roundTasks = state.tasks.filter((task) => task.agentRoundId === sourceRound.id)
+    const completedResponseSteps = Math.max(0, Math.trunc(Number(sourceRound.responseSteps) || 0))
+    const persistedResponseOutput = getCommittedAgentResponseOutput(sourceRound)
+    const unpersistedBuiltInImageCallIndex = getFirstUnpersistedBuiltInImageCallIndex(
+      persistedResponseOutput,
+      roundTasks,
+      sourceRound.id,
+    )
+    const retryResponseSteps = unpersistedBuiltInImageCallIndex >= 0
+      ? Math.max(0, completedResponseSteps - 1)
+      : completedResponseSteps
+    const hasCompletedResponseSteps = retryResponseSteps > 0
+    const retryOutputTaskIds = hasCompletedResponseSteps ? sourceRound.outputTaskIds : []
+    const configuredMaxToolCalls = Number.isFinite(requestSettings.agentMaxToolRounds)
+      ? Math.max(1, Math.trunc(requestSettings.agentMaxToolRounds))
+      : DEFAULT_AGENT_MAX_TOOL_ROUNDS
+    const maxToolCalls = isPlatformModeEnabled() ? Math.min(15, configuredMaxToolCalls) : configuredMaxToolCalls
+    const committedResponseOutput = hasCompletedResponseSteps
+      ? unpersistedBuiltInImageCallIndex >= 0
+        ? persistedResponseOutput.slice(0, unpersistedBuiltInImageCallIndex)
+        : persistedResponseOutput
+      : []
+    const recoveryRound = { ...sourceRound, responseOutput: committedResponseOutput, responseOutputPendingFrom: undefined }
+    const recoveredImages = hasCompletedResponseSteps ? createAgentRecoveredToolOutputs(recoveryRound, roundTasks, maxToolCalls) : null
+    const responseOutput = hasCompletedResponseSteps
+      ? mergeResponseOutputItems(committedResponseOutput, recoveredImages?.additions ?? [])
+      : []
+    const resumedContent = getAgentResponseOutputText(responseOutput)
     updateAgentConversation(conversationId, (current) => ({
       ...current,
       activeRoundId: sourceRound.id,
@@ -3724,23 +4125,35 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
         round.id === sourceRound.id
           ? {
               ...round,
-              outputTaskIds: [],
-              responseId: undefined,
-              responseOutput: undefined,
               status: 'running',
               error: null,
               finishedAt: null,
+              outputTaskIds: retryOutputTaskIds,
+              responseOutput,
+              responseOutputPendingFrom: undefined,
+              responseSteps: retryResponseSteps,
             }
           : round,
       ),
       messages: assistantMessageId
         ? current.messages.map((message) =>
-            message.id === assistantMessageId ? { ...message, content: '', outputTaskIds: [] } : message,
+            message.id === assistantMessageId ? { ...message, content: resumedContent, outputTaskIds: retryOutputTaskIds } : message,
           )
         : current.messages,
     }))
     state.setAgentEditingRoundId(null)
-    void executeAgentRound(conversationId, sourceRound.id, normalizedParams, requestSettings, activeProfile, imageProfile)
+    const resume = hasCompletedResponseSteps
+      ? {
+          responseOutput,
+          recoveredTaskIds: retryOutputTaskIds,
+          toolCallsUsed: getAgentRecoveredToolCallCount(responseOutput, roundTasks),
+        }
+      : undefined
+    const latestRound = useStore.getState().agentConversations
+      .find((item) => item.id === conversationId)?.rounds
+      .find((round) => round.id === sourceRound.id)
+    if (latestRound?.status !== 'running') return
+    void executeAgentRound(conversationId, sourceRound.id, normalizedParams, requestSettings, activeProfile, imageProfile, resume)
     return
   }
 
@@ -3756,6 +4169,8 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
     maskTargetImageId: sourceRound.maskTargetImageId ?? sourceUserMessage.maskTargetImageId ?? null,
     maskImageId: sourceRound.maskImageId ?? sourceUserMessage.maskImageId ?? null,
     outputTaskIds: [],
+    requestAttemptId: genId(),
+    responseSteps: 0,
     status: 'running',
     error: null,
     createdAt: now,
@@ -3812,7 +4227,8 @@ async function executeAgentRound(
       ? conversation.messages.find((message) => message.id === round.assistantMessageId) ?? null
       : conversation.messages.find((message) => message.roundId === roundId && message.role === 'assistant') ?? null
     const assistantMessageId = existingAssistantMessage?.id ?? genId()
-    const resumedAssistantContent = resume ? existingAssistantMessage?.content.trim() ?? '' : ''
+    const recoveredResponseText = resume ? getAgentResponseOutputText(resume.responseOutput) : ''
+    const resumedAssistantContent = resume ? recoveredResponseText || existingAssistantMessage?.content.trim() || '' : ''
     const shouldStreamAssistantMessage = activeProfile.streamImages === true
     const imageRequestSettings = createSettingsForApiProfile(requestSettings, imageProfile)
     const streamingTaskIds: string[] = resume ? [...round.outputTaskIds] : []
@@ -3890,7 +4306,12 @@ async function executeAgentRound(
       const toolCallId = image.toolCallId ?? genId()
       const taskId = await ensureStreamingAgentTask(toolCallId)
       const latestTask = useStore.getState().tasks.find((task) => task.id === taskId)
-      if (latestTask?.status === 'done' && latestTask.outputImages.length > 0) return taskId
+      if (latestTask?.status === 'done' && latestTask.outputImages.length > 0) {
+        if (rawResponsePayload && !latestTask.rawResponsePayload) {
+          await updateTaskInStore(taskId, { rawResponsePayload })
+        }
+        return taskId
+      }
 
       const stored = await storeImageWithSize(image.dataUrl, 'generated')
       cacheImage(stored.id, image.dataUrl)
@@ -4008,22 +4429,22 @@ async function executeAgentRound(
             ],
       }))
     }
-    const maxToolCalls = Number.isFinite(requestSettings.agentMaxToolRounds)
+    const configuredMaxToolCalls = Number.isFinite(requestSettings.agentMaxToolRounds)
       ? Math.max(1, Math.trunc(requestSettings.agentMaxToolRounds))
       : DEFAULT_AGENT_MAX_TOOL_ROUNDS
+    const maxToolCalls = isPlatformModeEnabled() ? Math.min(15, configuredMaxToolCalls) : configuredMaxToolCalls
+    const maxResponseSteps = isPlatformModeEnabled() ? 16 : maxToolCalls + 1
     let accumulatedOutputItems: ResponsesOutputItem[] = resume?.responseOutput ?? []
     let accumulatedText = resumedAssistantContent
     const textSegments: string[] = resumedAssistantContent ? [resumedAssistantContent] : []
     let lastResponseId: string | undefined = round.responseId
     let toolCallsUsed = resume?.toolCallsUsed ?? 0
     let apiInputForTurn = apiInput
-    if (resume) {
-      apiInputForTurn = buildAgentContinuationInput(apiInput, round, useStore.getState().tasks, accumulatedOutputItems, toolCallsUsed, maxToolCalls)
-      const batchImagesItem = await createAgentBatchImagesInputItem(round, useStore.getState().tasks, resume.recoveredTaskIds)
-      if (batchImagesItem) apiInputForTurn.splice(apiInputForTurn.length - 1, 0, batchImagesItem)
-    }
     let reachedToolLimit = resume ? toolCallsUsed >= maxToolCalls : false
     let pendingToolTextSeparator = false
+    let responseStep = resume ? Math.max(0, Math.trunc(Number(round.responseSteps) || 0)) : 0
+    let requestAttemptId = round.requestAttemptId || round.id
+    const retriedFailedResponseSteps = new Set<number>()
 
     // Helper: resolve reference image ids to data URLs for batch image calls
     const resolveReferenceImages = async (referenceIds: string[]): Promise<{ dataUrls: string[]; imageIds: string[] }> => {
@@ -4071,6 +4492,15 @@ async function executeAgentRound(
       }
     }
 
+    const executeSearchWebFunctionCall = async (functionCallItem: ResponsesOutputItem) => {
+      if (toolCallsUsed >= maxToolCalls) return JSON.stringify({ ok: false, error: { message: 'Tool limit reached' } })
+      toolCallsUsed += 1
+      const callId = functionCallItem.call_id ?? ''
+      const input = parseAgentSearchWebArguments(functionCallItem.arguments ?? '')
+      if (!callId || !input) return JSON.stringify({ ok: false, error: { message: 'Invalid search arguments' } })
+      return executeAgentSearchWeb(conversationId, roundId, callId, input, controller.signal)
+    }
+
     const callHybridImageApiSingle = async (opts: {
       taskId: string
       prompt: string
@@ -4085,6 +4515,7 @@ async function executeAgentRound(
         params: opts.taskParams,
         inputImageDataUrls: opts.referenceImageDataUrls,
         platformRequestIds: useStore.getState().tasks.find((task) => task.id === opts.taskId)?.platformRequestIds,
+        platformAgentContext: { conversationId, roundId },
         onPlatformRequestStarted: async (request) => {
           const latest = useStore.getState().tasks.find((task) => task.id === opts.taskId)
           const requestIds = [...(latest?.platformRequestIds || [])]
@@ -4131,6 +4562,8 @@ async function executeAgentRound(
     }
 
     const executeSingleImageFunctionCall = async (functionCallItem: ResponsesOutputItem): Promise<string> => {
+      if (toolCallsUsed >= maxToolCalls) return JSON.stringify({ status: 'error', error: 'Tool limit reached' })
+      toolCallsUsed += 1
       const callId = functionCallItem.call_id ?? ''
       const item = parseSingleImageCallArguments(functionCallItem.arguments ?? '')
       if (!item) return JSON.stringify({ error: 'Invalid or empty image arguments' })
@@ -4170,7 +4603,6 @@ async function executeAgentRound(
         if (controller.signal.aborted) throw createAgentAbortError()
         if (result.image) {
           await completeAgentImageTask({ ...result.image, toolCallId }, result.rawResponsePayload)
-          toolCallsUsed += 1
           return JSON.stringify({ id: item.id, status: 'done' })
         }
 
@@ -4186,27 +4618,48 @@ async function executeAgentRound(
     }
 
     // Helper: execute a generate_image_batch function call concurrently
-    const executeBatchFunctionCall = async (functionCallItem: ResponsesOutputItem): Promise<string> => {
+    const executeBatchFunctionCall = async (
+      functionCallItem: ResponsesOutputItem,
+      recoveryTaskIds: Array<string | undefined> = [],
+    ): Promise<string> => {
       const callId = functionCallItem.call_id ?? ''
       const args = functionCallItem.arguments ?? ''
-      const batchItems = parseBatchImageCallArguments(args)
+      const parsedBatchItems = parseBatchImageCallArguments(args)
 
-      if (!batchItems || batchItems.length === 0) {
+      if (!parsedBatchItems || parsedBatchItems.length === 0) {
         return JSON.stringify({ error: 'Invalid or empty batch arguments' })
       }
+      const remainingCalls = Math.max(0, maxToolCalls - toolCallsUsed)
+      if (remainingCalls === 0) return JSON.stringify({ error: 'Tool limit reached' })
+      const batchItems = parsedBatchItems.slice(0, remainingCalls)
+      const skippedItems = parsedBatchItems.slice(remainingCalls)
+      toolCallsUsed += batchItems.length
 
       // Create task cards in model-provided order before starting network calls.
       const batchExecutionItems = []
-      for (const item of batchItems) {
+      for (let index = 0; index < batchItems.length; index++) {
+        const item = batchItems[index]
         const referenceIds = uniqueIds(extractAgentReferenceIds(item.prompt))
         const references = await resolveReferenceImages(referenceIds)
-        const batchToolCallId = genId()
+        const recoveryTask = recoveryTaskIds[index]
+          ? useStore.getState().tasks.find((task) => task.id === recoveryTaskIds[index])
+          : undefined
+        const batchToolCallId = recoveryTask?.agentToolCallId ?? genId()
         const taskParams = requestSettings.agentApiConfigMode === 'hybrid'
           ? {
               ...normalizeParamsForSettings(params, imageRequestSettings, { hasInputImages: references.dataUrls.length > 0 }),
               n: 1,
             }
           : { ...params, n: 1 }
+        if (recoveryTask) {
+          await updateTaskInStore(recoveryTask.id, {
+            status: 'running',
+            error: null,
+            finishedAt: null,
+            elapsed: null,
+            platformRecoverable: false,
+          })
+        }
         await ensureStreamingAgentTask(batchToolCallId, item.prompt, references.imageIds, {
           createdAt: Date.now(),
           taskParams,
@@ -4274,8 +4727,8 @@ async function executeAgentRound(
             })
 
         if (controller.signal.aborted) throw createAgentAbortError()
-        // If not streaming and we have an image, complete the pre-created task.
-        if (batchResult.image && !shouldStreamAssistantMessage) {
+        // 流式回调可能已完成任务；这里再做一次幂等收尾，覆盖混合模式没有完成回调的情况。
+        if (batchResult.image) {
           await completeAgentImageTask({ ...batchResult.image, toolCallId: batchToolCallId }, batchResult.rawResponsePayload)
         }
 
@@ -4317,26 +4770,222 @@ async function executeAgentRound(
       }
       if (pausedForRecovery) throw createAgentRecoveryPauseError()
 
-      const successCount = outputImages.filter((img) => img.status === 'done').length
-      toolCallsUsed += successCount
+      for (const item of skippedItems) outputImages.push({ id: item.id, status: 'error', error: 'Tool limit reached' })
 
       return JSON.stringify({ images: outputImages })
     }
 
-    while (true) {
+    const existingOutputCallIds = getAgentFunctionOutputCallIds(accumulatedOutputItems)
+    const recoveredToolOrder = ['generate_image', 'generate_image_batch', 'search_web', 'continue_generation']
+    const pendingRecoveredFunctionCalls = resume
+      ? accumulatedOutputItems.filter((item) =>
+          item.type === 'function_call' && item.call_id && !existingOutputCallIds.has(item.call_id),
+        ).sort((a, b) => {
+          const aIndex = recoveredToolOrder.indexOf(a.name ?? '')
+          const bIndex = recoveredToolOrder.indexOf(b.name ?? '')
+          return (aIndex < 0 ? recoveredToolOrder.length : aIndex) -
+            (bIndex < 0 ? recoveredToolOrder.length : bIndex)
+        })
+      : []
+    const lastRecoveredOutputItem = accumulatedOutputItems[accumulatedOutputItems.length - 1]
+    const hasUnpersistedBuiltInImageCall = getFirstUnpersistedBuiltInImageCallIndex(
+      accumulatedOutputItems,
+      useStore.getState().tasks,
+      roundId,
+    ) >= 0
+    const shouldFinalizeRecoveredResponse = Boolean(
+      resume &&
+      accumulatedOutputItems.length > 0 &&
+      pendingRecoveredFunctionCalls.length === 0 &&
+      !hasUnpersistedBuiltInImageCall &&
+      lastRecoveredOutputItem?.type !== 'function_call_output',
+    )
+
+    if (resume && !shouldFinalizeRecoveredResponse) {
+      const recoveredOutputs: ResponsesOutputItem[] = []
+      for (const item of pendingRecoveredFunctionCalls) {
+        if (!item.call_id) continue
+        if (item.name === 'generate_image') {
+          const existingTask = useStore.getState().tasks.find((task) =>
+            task.agentRoundId === roundId && task.agentToolCallId === item.call_id,
+          )
+          if (existingTask) {
+            if (existingTask.status === 'running' || existingTask.falRecoverable || existingTask.customRecoverable || existingTask.platformRecoverable) {
+              throw createAgentRecoveryPauseError()
+            }
+            if (isUnsubmittedInterruptedPlatformTask(existingTask)) {
+              await updateTaskInStore(existingTask.id, {
+                status: 'running',
+                error: null,
+                finishedAt: null,
+                elapsed: null,
+              })
+              recoveredOutputs.push({
+                type: 'function_call_output',
+                call_id: item.call_id,
+                output: await executeSingleImageFunctionCall(item),
+              })
+              continue
+            }
+            const args = parseSingleImageCallArguments(item.arguments ?? '')
+            const ok = existingTask.status === 'done' && existingTask.outputImages.length > 0
+            recoveredOutputs.push({
+              type: 'function_call_output',
+              call_id: item.call_id,
+              output: JSON.stringify({
+                id: args?.id || 'image',
+                status: ok ? 'done' : 'error',
+                ...(ok ? {} : { error: existingTask.error || '图像生成失败' }),
+              }),
+            })
+          } else {
+            recoveredOutputs.push({
+              type: 'function_call_output',
+              call_id: item.call_id,
+              output: await executeSingleImageFunctionCall(item),
+            })
+          }
+          continue
+        }
+
+        if (item.name === 'generate_image_batch') {
+          const batchItems = parseBatchImageCallArguments(item.arguments ?? '')
+          if (!batchItems?.length) {
+            recoveredOutputs.push({
+              type: 'function_call_output',
+              call_id: item.call_id,
+              output: JSON.stringify({ error: 'Invalid or empty batch arguments' }),
+            })
+            continue
+          }
+          const existingTasks = useStore.getState().agentConversations
+            .find((current) => current.id === conversationId)?.rounds
+            .find((current) => current.id === roundId)?.outputTaskIds
+            .map((taskId) => useStore.getState().tasks.find((task) => task.id === taskId))
+            .filter((task): task is TaskRecord => Boolean(task && task.agentBatchCallId === item.call_id)) ?? []
+          if (existingTasks.some((task) => task.status === 'running' || task.falRecoverable || task.customRecoverable || task.platformRecoverable)) {
+            throw createAgentRecoveryPauseError()
+          }
+          const retryItems = batchItems
+            .map((batchItem, index) => ({ batchItem, index, task: existingTasks[index] }))
+            .filter((entry) => !entry.task || isUnsubmittedInterruptedPlatformTask(entry.task))
+          const retryIndexes = new Set(retryItems.map((entry) => entry.index))
+          const missingResult = retryItems.length > 0
+            ? await executeBatchFunctionCall({
+                ...item,
+                arguments: JSON.stringify({ images: retryItems.map((entry) => entry.batchItem) }),
+              }, retryItems.map((entry) => entry.task?.id))
+            : JSON.stringify({ images: [] })
+          let missingImages: Array<{ id?: string; status?: string; error?: string }> = []
+          try {
+            const parsed = JSON.parse(missingResult) as { images?: Array<{ id?: string; status?: string; error?: string }> }
+            missingImages = Array.isArray(parsed.images) ? parsed.images : []
+          } catch {
+            /* 使用下方的缺失结果错误。 */
+          }
+          const images = batchItems.map((batchItem, index) => {
+            const task = existingTasks[index]
+            if (task && !retryIndexes.has(index)) {
+              const ok = task.status === 'done' && task.outputImages.length > 0
+              return {
+                id: batchItem.id,
+                status: ok ? 'done' : 'error',
+                ...(ok ? {} : { error: task.error || '图像生成失败' }),
+              }
+            }
+            return missingImages.find((image) => image.id === batchItem.id)
+              ?? { id: batchItem.id, status: 'error', error: '图像恢复结果缺失' }
+          })
+          recoveredOutputs.push({
+            type: 'function_call_output',
+            call_id: item.call_id,
+            output: JSON.stringify({ images }),
+          })
+          continue
+        }
+
+        if (item.name === 'search_web') {
+          recoveredOutputs.push({
+            type: 'function_call_output',
+            call_id: item.call_id,
+            output: await executeSearchWebFunctionCall(item),
+          })
+          continue
+        }
+
+        if (item.name === 'continue_generation') {
+          const allowed = toolCallsUsed < maxToolCalls
+          if (allowed) toolCallsUsed += 1
+          recoveredOutputs.push({
+            type: 'function_call_output',
+            call_id: item.call_id,
+            output: JSON.stringify(allowed ? { status: 'continued' } : { status: 'error', error: 'Tool limit reached' }),
+          })
+        }
+      }
+
+      if (recoveredOutputs.length > 0) {
+        accumulatedOutputItems = mergeResponseOutputItems(accumulatedOutputItems, recoveredOutputs)
+        updateAgentConversation(conversationId, (current) => ({
+          ...current,
+          updatedAt: Date.now(),
+          rounds: current.rounds.map((item) =>
+            item.id === roundId ? { ...item, responseOutput: accumulatedOutputItems } : item,
+          ),
+        }))
+      }
+
+      reachedToolLimit = toolCallsUsed >= maxToolCalls
+      const recoveredRound = useStore.getState().agentConversations
+        .find((current) => current.id === conversationId)?.rounds
+        .find((current) => current.id === roundId) ?? round
+      apiInputForTurn = buildAgentContinuationInput(
+        apiInput,
+        recoveredRound,
+        useStore.getState().tasks,
+        accumulatedOutputItems,
+        toolCallsUsed,
+        maxToolCalls,
+      )
+      const batchImagesItem = await createAgentBatchImagesInputItem(
+        recoveredRound,
+        useStore.getState().tasks,
+        streamingTaskIds,
+        createAgentContextImageBudget(apiInputForTurn),
+      )
+      if (batchImagesItem) apiInputForTurn.splice(apiInputForTurn.length - 1, 0, batchImagesItem)
+      pendingToolTextSeparator = true
+    }
+
+    while (!shouldFinalizeRecoveredResponse) {
       if (controller.signal.aborted) throw createAgentAbortError()
-      if (reachedToolLimit) break
+      if (responseStep >= maxResponseSteps) {
+        reachedToolLimit = true
+        break
+      }
       const textBeforeResponse = accumulatedText
+      const outputCountBeforeResponse = accumulatedOutputItems.length
       let currentResponseOutputItems: ResponsesOutputItem[] = []
-      const result = await callAgentResponsesApi({
-        settings: requestSettings,
-        profile: activeProfile,
-        params,
-        input: apiInputForTurn,
-        maskDataUrl,
-        signal: controller.signal,
-        onTextDelta: shouldStreamAssistantMessage
-          ? (delta) => {
+      const currentResponseTaskIds = new Set<string>()
+      let result: Awaited<ReturnType<typeof callAgentResponsesApi>>
+      try {
+        result = await callAgentResponsesApi({
+          settings: requestSettings,
+          profile: activeProfile,
+          params,
+          input: apiInputForTurn,
+          maskDataUrl,
+          disableTools: reachedToolLimit,
+          ...(isPlatformModeEnabled() ? {
+            context: {
+              conversationId,
+              roundId,
+              stepKey: `${roundId}-${requestAttemptId}-${responseStep}`,
+            },
+          } : {}),
+          signal: controller.signal,
+          onTextDelta: shouldStreamAssistantMessage
+            ? (delta) => {
               if (controller.signal.aborted) return
               if (pendingToolTextSeparator && delta && accumulatedText.trim()) {
                 accumulatedText += '\n\n'
@@ -4346,50 +4995,81 @@ async function executeAgentRound(
               accumulatedText += delta
               appendAgentAssistantMessageContent(conversationId, assistantMessageId, delta)
             }
-          : undefined,
-        onOutputItems: shouldStreamAssistantMessage
-          ? (outputItems) => {
+            : undefined,
+          onOutputItems: shouldStreamAssistantMessage
+            ? (outputItems) => {
               if (controller.signal.aborted) return
               currentResponseOutputItems = outputItems
               updateAgentConversation(conversationId, (current) => ({
                 ...current,
-                rounds: current.rounds.map((item) => item.id === roundId ? { ...item, responseOutput: mergeResponseOutputItems(accumulatedOutputItems, outputItems) } : item),
+                rounds: current.rounds.map((item) => item.id === roundId
+                  ? {
+                      ...item,
+                      responseOutput: mergeResponseOutputItems(accumulatedOutputItems, outputItems),
+                      responseOutputPendingFrom: accumulatedOutputItems.length,
+                    }
+                  : item),
               }))
             }
-          : undefined,
-        onImageToolStarted: shouldStreamAssistantMessage
-          ? async ({ toolCallId }) => {
+            : undefined,
+          onImageToolStarted: shouldStreamAssistantMessage
+            ? async ({ toolCallId }) => {
               if (controller.signal.aborted) return
-              await ensureStreamingAgentTask(toolCallId)
+              currentResponseTaskIds.add(await ensureStreamingAgentTask(toolCallId))
             }
-          : undefined,
-        onImagePartialImage: shouldStreamAssistantMessage
-          ? async ({ toolCallId, image, partialImageIndex }) => {
+            : undefined,
+          onImagePartialImage: shouldStreamAssistantMessage
+            ? async ({ toolCallId, image, partialImageIndex }) => {
               if (controller.signal.aborted) return
               const taskId = await ensureStreamingAgentTask(toolCallId)
+              currentResponseTaskIds.add(taskId)
               if (controller.signal.aborted) return
               useStore.getState().setTaskStreamPreview(taskId, image, partialImageIndex)
               if (partialImageIndex === 0 || partialImageIndex == null) {
                 void persistTaskStreamPartialImage(taskId, image)
               }
             }
-          : undefined,
-        onImageToolCompleted: shouldStreamAssistantMessage
-          ? async (image) => {
+            : undefined,
+          onImageToolCompleted: shouldStreamAssistantMessage
+            ? async (image) => {
               if (controller.signal.aborted) return
-              await completeAgentImageTask(image)
+              currentResponseTaskIds.add(await completeAgentImageTask(image))
             }
-          : undefined,
-        onImageToolFailed: shouldStreamAssistantMessage
-          ? async ({ toolCallId, error }) => {
+            : undefined,
+          onImageToolFailed: shouldStreamAssistantMessage
+            ? async ({ toolCallId, error }) => {
               if (controller.signal.aborted) return
-              await ensureStreamingAgentTask(toolCallId)
+              currentResponseTaskIds.add(await ensureStreamingAgentTask(toolCallId))
               if (controller.signal.aborted) return
               failAgentImageTask(toolCallId, error)
             }
-          : undefined,
-      })
+            : undefined,
+        })
+      } catch (err) {
+        if (isPlatformModeEnabled() && isPlatformAgentCallFailedError(err) && !retriedFailedResponseSteps.has(responseStep)) {
+          retriedFailedResponseSteps.add(responseStep)
+          requestAttemptId = genId()
+          updateAgentConversation(conversationId, (current) => ({
+            ...current,
+            rounds: current.rounds.map((item) => item.id === roundId ? { ...item, requestAttemptId } : item),
+          }))
+          continue
+        }
+        throw err
+      }
       if (controller.signal.aborted) throw createAgentAbortError()
+      responseStep += 1
+
+      const textBilling = getAgentTextBilling(result.imageStudioBilling)
+      if (textBilling) {
+        addAgentRoundBilling(conversationId, roundId, {
+          model: textBilling.model,
+          inputTokens: textBilling.inputTokens,
+          cachedInputTokens: textBilling.cachedInputTokens,
+          outputTokens: textBilling.outputTokens,
+          textChargeMicros: textBilling.chargeMicros,
+        })
+      }
 
       lastResponseId = result.responseId ?? lastResponseId
       currentResponseOutputItems = currentResponseOutputItems.length ? currentResponseOutputItems : result.outputItems ?? []
@@ -4397,7 +5077,14 @@ async function executeAgentRound(
       updateAgentConversation(conversationId, (current) => ({
         ...current,
         updatedAt: Date.now(),
-        rounds: current.rounds.map((item) => item.id === roundId ? { ...item, responseId: lastResponseId, responseOutput: accumulatedOutputItems } : item),
+        rounds: current.rounds.map((item) => item.id === roundId
+          ? {
+              ...item,
+              responseId: lastResponseId,
+              responseOutput: accumulatedOutputItems,
+              responseOutputPendingFrom: outputCountBeforeResponse,
+            }
+          : item),
       }))
 
       const responseText = result.text.trim()
@@ -4413,6 +5100,7 @@ async function executeAgentRound(
       for (const image of result.images) {
         if (image.toolCallId && taskIdByToolCallId.has(image.toolCallId)) {
           const completedTaskId = await completeAgentImageTask(image, result.rawResponsePayload)
+          currentResponseTaskIds.add(completedTaskId)
           const promptRefIds = uniqueIds(extractAgentReferenceIds(image.revisedPrompt ?? ''))
           if (promptRefIds.length > 0) {
             const promptRefs = await resolveReferenceImages(promptRefIds)
@@ -4469,14 +5157,23 @@ async function executeAgentRound(
         useStore.getState().setTasks([task, ...useStore.getState().tasks])
         attachTaskToAgentRound(task.id)
         await putTask(task)
+        currentResponseTaskIds.add(task.id)
       }
 
-      if (result.rawResponsePayload && streamingTaskIds.length > 0) {
-        for (const taskId of streamingTaskIds) {
+      if (result.rawResponsePayload && currentResponseTaskIds.size > 0) {
+        for (const taskId of currentResponseTaskIds) {
           const latestTask = useStore.getState().tasks.find((task) => task.id === taskId)
           if (latestTask && !latestTask.rawResponsePayload) updateTaskInStore(taskId, { rawResponsePayload: result.rawResponsePayload })
         }
       }
+
+      updateAgentConversation(conversationId, (current) => ({
+        ...current,
+        updatedAt: Date.now(),
+        rounds: current.rounds.map((item) => item.id === roundId
+          ? { ...item, responseOutputPendingFrom: undefined, responseSteps: responseStep }
+          : item),
+      }))
 
       // Check for function calls that require continuation
       const imageFunctionCalls = currentResponseOutputItems.filter(
@@ -4488,10 +5185,13 @@ async function executeAgentRound(
       const continueFunctionCalls = currentResponseOutputItems.filter(
         (item) => item.type === 'function_call' && item.name === 'continue_generation',
       )
+      const searchFunctionCalls = currentResponseOutputItems.filter(
+        (item) => item.type === 'function_call' && item.name === 'search_web',
+      )
 
       // Count built-in tool calls (image_generation, web_search) for budget tracking
       const responseToolCalls = countResponseToolCalls(currentResponseOutputItems)
-      toolCallsUsed += responseToolCalls
+      toolCallsUsed = Math.min(maxToolCalls, toolCallsUsed + responseToolCalls)
 
       // Collect function_call_output items for all function calls that need responses
       const functionCallOutputs: ResponsesOutputItem[] = []
@@ -4518,11 +5218,23 @@ async function executeAgentRound(
         }
       }
 
+      if (searchFunctionCalls.length > 0) {
+        for (const fc of searchFunctionCalls) {
+          functionCallOutputs.push({
+            type: 'function_call_output',
+            call_id: fc.call_id,
+            output: await executeSearchWebFunctionCall(fc),
+          })
+        }
+      }
+
       for (const fc of continueFunctionCalls) {
+        const allowed = toolCallsUsed < maxToolCalls
+        if (allowed) toolCallsUsed += 1
         functionCallOutputs.push({
           type: 'function_call_output',
           call_id: fc.call_id,
-          output: JSON.stringify({ status: 'continued' }),
+          output: JSON.stringify(allowed ? { status: 'continued' } : { status: 'error', error: 'Tool limit reached' }),
         })
       }
 
@@ -4537,6 +5249,7 @@ async function executeAgentRound(
       }
 
       const accumulatedOutputItemsWithFunctionOutputs = mergeResponseOutputItems(accumulatedOutputItems, functionCallOutputs)
+      accumulatedOutputItems = accumulatedOutputItemsWithFunctionOutputs
 
       updateAgentConversation(conversationId, (current) => ({
         ...current,
@@ -4546,7 +5259,6 @@ async function executeAgentRound(
 
       if (toolCallsUsed >= maxToolCalls) {
         reachedToolLimit = true
-        break
       }
 
       // Build continuation input with function call outputs and available refs
@@ -4562,13 +5274,15 @@ async function executeAgentRound(
         toolCallsUsed,
         maxToolCalls,
       )
-      // Insert function_call_output items before the continuation system message
-      continuationBase.splice(continuationBase.length - 1, 0, ...functionCallOutputs)
       // Inject batch-generated images as input_image user message for model visibility
-      const batchImagesItem = await createAgentBatchImagesInputItem(latestRound, useStore.getState().tasks, streamingTaskIds)
+      const batchImagesItem = await createAgentBatchImagesInputItem(
+        latestRound,
+        useStore.getState().tasks,
+        streamingTaskIds,
+        createAgentContextImageBudget(continuationBase),
+      )
       if (batchImagesItem) continuationBase.splice(continuationBase.length - 1, 0, batchImagesItem)
       apiInputForTurn = continuationBase
-      accumulatedOutputItems = accumulatedOutputItemsWithFunctionOutputs
       pendingToolTextSeparator = true
     }
 
@@ -4620,6 +5334,9 @@ async function executeAgentRound(
         : [...current.messages, assistantMessage],
     }))
 
+    if (isPlatformModeEnabled()) await finishPlatformAgentRound(conversationId, roundId).catch(() => undefined)
+    await syncPlatformAgentBillingRounds(conversationId)
+
     useStore.getState().showToast(outputIds.length > 0 ? 'Agent 已生成图片' : 'Agent 已回复', 'success')
     showTaskCompletionNotification(
       outputIds.length > 0 ? 'Agent 已生成图片' : 'Agent 已回复',
@@ -4635,7 +5352,9 @@ async function executeAgentRound(
 
     if (isAgentRecoveryPauseError(err)) return
 
-    let message = err instanceof Error ? err.message : String(err)
+    let message = isNetworkRecoverableError(err)
+      ? '无法连接 Agent 服务，请检查服务配置、网络或超时设置后重试。'
+      : err instanceof Error ? err.message : String(err)
     const usesApiProxy = activeProfile.apiProxy ?? requestSettings.apiProxy
     const networkErrorHint = getApiRequestNetworkErrorHint(err, startedAt, usesApiProxy, activeProfile)
     if (networkErrorHint && !message.includes(IMAGE_FETCH_CORS_HINT)) {
@@ -4680,6 +5399,7 @@ async function executeAgentRound(
             ],
       }
     })
+    await syncPlatformAgentBillingRounds(conversationId)
     useStore.getState().showToast(`Agent 请求失败：${message}`, 'error')
   } finally {
     if (agentRoundControllers.get(controllerKey) === controller) {
@@ -4747,6 +5467,9 @@ async function executeTask(taskId: string) {
       inputImageDataUrls: inputDataUrls,
       maskDataUrl,
       platformRequestIds: task.platformRecoverable ? task.platformRequestIds : undefined,
+      platformAgentContext: task.agentConversationId && task.agentRoundId
+        ? { conversationId: task.agentConversationId, roundId: task.agentRoundId }
+        : undefined,
       onPlatformRequestStarted: async (request) => {
         const latest = useStore.getState().tasks.find((item) => item.id === taskId)
         const requestIds = [...(latest?.platformRequestIds || [])]
@@ -4850,6 +5573,7 @@ async function executeTask(taskId: string) {
       : `生成完成，共 ${outputIds.length} 张图片`
     useStore.getState().showToast(completionMessage, failedCount > 0 ? 'error' : 'success')
     if (!isAgentTask(task)) showTaskCompletionNotification('图像生成完成', `${completionMessage}。`)
+    else void continueRecoveredAgentRound(taskId)
     const currentMask = useStore.getState().maskDraft
     if (
       maskDataUrl &&
@@ -4925,6 +5649,7 @@ async function executeTask(taskId: string) {
         elapsed: Date.now() - task.createdAt,
       })
       useStore.getState().setDetailTaskId(taskId)
+      if (isAgentTask(latestTask)) void continueRecoveredAgentRound(taskId)
     }
   } finally {
     // 释放输入图片的内存缓存（已持久化到 IndexedDB，后续按需从 DB 加载）
@@ -5502,7 +6227,7 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `gpt-image-playground-backup_${formatExportFileTime(new Date(exportedAt))}.zip`
+    a.download = `kunai-studio-backup_${formatExportFileTime(new Date(exportedAt))}.zip`
     a.click()
     URL.revokeObjectURL(url)
     useStore.getState().showToast('数据已导出', 'success')

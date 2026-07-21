@@ -85,14 +85,22 @@ function normalizeImageApiPayload(value: unknown): ImageApiResponse {
   return { data: [] }
 }
 
-function createRequestHeaders(profile: ApiProfile, requestId?: string): Record<string, string> {
+function createRequestHeaders(
+  profile: ApiProfile,
+  requestId?: string,
+  agentContext?: CallApiOptions['platformAgentContext'],
+): Record<string, string> {
   const platformProfile = profile.id === PLATFORM_IMAGE_PROFILE_ID
   return {
     Authorization: `Bearer ${profile.apiKey}`,
     ...(platformProfile ? {
-      'X-Image-Studio-User': getActiveStorageUser(),
+      'X-KunAI-User': getActiveStorageUser(),
       'X-CSRF-Token': getPlatformCsrfToken(),
       ...(requestId ? { 'X-Idempotency-Key': requestId } : {}),
+      ...(agentContext ? {
+        'X-Agent-Conversation-Id': agentContext.conversationId,
+        'X-Agent-Round-Id': agentContext.roundId,
+      } : {}),
     } : {}),
   }
 }
@@ -598,7 +606,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile, re
     ? opts.platformRequestIds?.[requestIndex] || createPlatformRequestId()
     : undefined
   if (platformRequestId) await opts.onPlatformRequestStarted?.({ requestId: platformRequestId, requestIndex })
-  const requestHeaders = createRequestHeaders(profile, platformRequestId)
+  const requestHeaders = createRequestHeaders(profile, platformRequestId, opts.platformAgentContext)
   const paths = createOpenAICompatiblePaths()
 
   const controller = new AbortController()

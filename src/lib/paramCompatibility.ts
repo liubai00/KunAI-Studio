@@ -1,6 +1,8 @@
 import { DEFAULT_PARAMS, type AppSettings, type TaskParams } from '../types'
 import { getActiveApiProfile } from './apiProfiles'
-import { normalizeImageSize } from './size'
+import { getQualityValueForSizeTier, getSizeTierForQuality } from './quality'
+import { calculateImageSizeForTier, getImageSizeTier, normalizeImageSize } from './size'
+import { PLATFORM_IMAGE_PROFILE_ID } from './platformMode'
 
 export const DEFAULT_FAL_IMAGE_SIZE = '1360x1024'
 export const MAX_FAL_OUTPUT_IMAGES = 4
@@ -21,6 +23,12 @@ export function normalizeParamsForSettings(
     ...params,
     size: normalizeImageSize(params.size) || DEFAULT_PARAMS.size,
     n: Math.min(outputImageLimit, Math.max(1, params.n || DEFAULT_PARAMS.n)),
+  }
+
+  if (activeProfile.id === PLATFORM_IMAGE_PROFILE_ID) {
+    const tier = getSizeTierForQuality(nextParams.quality) ?? getImageSizeTier(nextParams.size)
+    nextParams.quality = getQualityValueForSizeTier(tier)
+    nextParams.size = calculateImageSizeForTier(tier, nextParams.size)
   }
 
   if (activeProfile.provider === 'openai' && activeProfile.codexCli) {

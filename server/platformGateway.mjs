@@ -7,7 +7,9 @@ import sharp from 'sharp'
 import { getSessionToken, parseCookies } from './platformAuth.mjs'
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024
-const ALLOWED_AGENT_FUNCTIONS = new Set(['generate_image', 'generate_image_batch', 'continue_generation'])
+const MAX_AGENT_RESULT_BYTES = 2 * 1024 * 1024 - 16 * 1024
+const ALLOWED_AGENT_FUNCTIONS = new Set(['generate_image', 'generate_image_batch', 'continue_generation', 'search_web'])
+const ALLOWED_AGENT_REQUEST_FIELDS = new Set(['model', 'instructions', 'input', 'tools', 'stream', 'max_output_tokens'])
 const ALLOWED_RELAY_PATHS = new Set([
   'images/generations',
   'images/edits',
@@ -80,9 +82,9 @@ export async function readJsonBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
   }
 }
 
-export function selectImageModel(size, models = {}, fallback = 'gpt-image-2') {
+function getRequestedImageSpec(size) {
   const value = String(size || '').trim()
-  if (!value || value === 'auto') return models['1k'] || fallback
+  if (!value || value === 'auto') return null
   const match = value.match(/^(\d+)x(\d+)$/i)
   if (!match) throw createHttpError('图片尺寸格式无效', 400, 'INVALID_IMAGE_SIZE')
   const width = Number(match[1])
@@ -91,8 +93,18 @@ export function selectImageModel(size, models = {}, fallback = 'gpt-image-2') {
   if (!Number.isSafeInteger(pixels) || width <= 0 || height <= 0 || pixels > 8294400) {
     throw createHttpError('图片尺寸超出支持范围', 400, 'INVALID_IMAGE_SIZE')
   }
-  if (pixels <= 1572864) return models['1k'] || fallback
-  if (pixels <= 4194304) return models['2k'] || models['1k'] || fallback
+  const tier = pixels <= 1572864 ? '1k' : pixels <= 4194304 ? '2k' : '4k'
+  return { width, height, tier }
+}
+
+export function getRequestedImageTier(size) {
+  return getRequestedImageSpec(size)?.tier ?? '1k'
+}
+
+export function selectImageModel(size, models = {}, fallback = 'gpt-image-2') {
+  const tier = getRequestedImageTier(size)
+  if (tier === '1k') return models['1k'] || fallback
+  if (tier === '2k') return models['2k'] || models['1k'] || fallback
   return models['4k'] || models['2k'] || models['1k'] || fallback
 }
 
@@ -100,7 +112,7 @@ export async function normalizeRelayRequest(path, contentType, body, options = {
   const normalizedPath = path.replace(/^\/+/, '').replace(/\/+$/, '')
   const imageModel = options.imageModel || 'gpt-image-2'
   const imageModels = options.imageModels || {}
-  const agentModel = options.agentModel || 'gpt-5.5'
+  const agentModel = options.agentModel || ''
 
   if (normalizedPath === 'images/edits') {
     if (!contentType.toLowerCase().startsWith('multipart/form-data;')) {
@@ -112,12 +124,14 @@ export async function normalizeRelayRequest(path, contentType, body, options = {
     } catch {
       throw createHttpError('无法解析图片编辑请求', 400, 'INVALID_MULTIPART')
     }
+    const requestedImageSize = getRequestedImageSpec(formData.get('size'))
+    const requestedImageTier = requestedImageSize?.tier ?? '1k'
     formData.set('model', selectImageModel(formData.get('size'), imageModels, imageModel))
     formData.set('n', '1')
     formData.set('stream', 'false')
     formData.set('response_format', 'b64_json')
     formData.delete('partial_images')
-    return { body: formData }
+    return { body: formData, requestedImageTier, requestedImageSize }
   }
 
   if (!contentType.toLowerCase().startsWith('application/json')) {
@@ -135,26 +149,42 @@ export async function normalizeRelayRequest(path, contentType, body, options = {
   }
 
   if (normalizedPath === 'responses') {
+    const invalidField = Object.keys(payload).find((key) => !ALLOWED_AGENT_REQUEST_FIELDS.has(key))
+    if (invalidField) throw createHttpError('Agent 请求包含未授权参数', 403, 'UNAUTHORIZED_AGENT_FIELD')
     const tools = Array.isArray(payload.tools) ? payload.tools : []
     const invalidTool = tools.find((tool) => {
       if (!tool || typeof tool !== 'object') return true
-      if (tool.type === 'web_search') return false
       if (tool.type !== 'function') return true
       return !ALLOWED_AGENT_FUNCTIONS.has(String(tool.name || ''))
     })
     if (invalidTool) throw createHttpError('Agent 请求包含未授权工具', 403, 'UNAUTHORIZED_TOOL')
-    payload.model = agentModel
+    const requestedModel = String(payload.model || agentModel).trim()
+    if (!requestedModel) throw createHttpError('Agent 模型不能为空', 400, 'AGENT_MODEL_REQUIRED')
+    payload.model = requestedModel
+    const requestHashBody = Buffer.from(JSON.stringify(payload))
+    payload.stream = false
+    payload.store = false
+    const maxOutputTokens = Math.trunc(Number(payload.max_output_tokens) || Number(options.agentMaxOutputTokens) || 4096)
+    payload.max_output_tokens = Math.max(1, Math.min(maxOutputTokens, Number(options.agentMaxOutputTokens) || 4096))
+    return {
+      body: Buffer.from(JSON.stringify(payload)),
+      contentType: 'application/json',
+      requestHashBody,
+    }
   } else {
+    const requestedImageSize = getRequestedImageSpec(payload.size)
+    const requestedImageTier = requestedImageSize?.tier ?? '1k'
     payload.model = selectImageModel(payload.size, imageModels, imageModel)
     payload.n = 1
     payload.stream = false
     payload.response_format = 'b64_json'
     delete payload.partial_images
-  }
-
-  return {
-    body: Buffer.from(JSON.stringify(payload)),
-    contentType: 'application/json',
+    return {
+      body: Buffer.from(JSON.stringify(payload)),
+      contentType: 'application/json',
+      requestedImageTier,
+      requestedImageSize,
+    }
   }
 }
 
@@ -189,7 +219,68 @@ async function readUpstreamBody(upstream, maxBytes) {
   return Buffer.concat(chunks)
 }
 
-async function normalizeSuccessfulImageResponse(body, maxImagePixels) {
+function getSafeTokenCount(value) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
+export function parseAgentResponseUsage(payload) {
+  const usage = payload?.usage
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return null
+  const inputTokens = getSafeTokenCount(usage.input_tokens)
+  const outputTokens = getSafeTokenCount(usage.output_tokens)
+  if (inputTokens == null || outputTokens == null) return null
+  const cachedValue = usage.input_tokens_details?.cached_tokens
+  const cachedInputTokens = cachedValue === undefined ? 0 : getSafeTokenCount(cachedValue)
+  if (cachedInputTokens == null || cachedInputTokens > inputTokens) return null
+  return { inputTokens, cachedInputTokens, outputTokens }
+}
+
+export function calculateAgentChargeMicros(model, usage) {
+  const inputRate = getSafeTokenCount(model?.inputTokenPriceMicros ?? model?.inputPriceMicros ?? model?.input_price_micros) ?? 0
+  const cachedRate = getSafeTokenCount(model?.cachedInputTokenPriceMicros ?? model?.cachedInputPriceMicros ?? model?.cached_input_price_micros) ?? 0
+  const outputRate = getSafeTokenCount(model?.outputTokenPriceMicros ?? model?.outputPriceMicros ?? model?.output_price_micros) ?? 0
+  const uncachedInputTokens = Math.max(0, usage.inputTokens - usage.cachedInputTokens)
+  const price = (tokens, rate) => tokens > 0 && rate > 0 ? Math.ceil(tokens * rate / 1000000) : 0
+  return price(uncachedInputTokens, inputRate) + price(usage.cachedInputTokens, cachedRate) + price(usage.outputTokens, outputRate)
+}
+
+export function calculateAgentRequestReserveMicros(model, inputBytes, maxOutputTokens, inputTokenOverhead = 0) {
+  const byteCount = Math.trunc(Number(inputBytes))
+  const outputCount = Math.trunc(Number(maxOutputTokens))
+  const overheadCount = Math.trunc(Number(inputTokenOverhead))
+  if (!Number.isSafeInteger(byteCount) || byteCount < 0 || !Number.isSafeInteger(outputCount) || outputCount < 0 || !Number.isSafeInteger(overheadCount) || overheadCount < 0) {
+    throw createHttpError('Agent 请求大小或输出上限无效', 400, 'INVALID_AGENT_LIMIT')
+  }
+  const inputTokenBound = byteCount + overheadCount
+  if (!Number.isSafeInteger(inputTokenBound)) throw createHttpError('Agent 请求超出计费范围', 413, 'AGENT_CONTEXT_TOO_LARGE')
+  const inputRate = Math.max(
+    getSafeTokenCount(model?.inputTokenPriceMicros ?? model?.inputPriceMicros ?? model?.input_price_micros) ?? 0,
+    getSafeTokenCount(model?.cachedInputTokenPriceMicros ?? model?.cachedInputPriceMicros ?? model?.cached_input_price_micros) ?? 0,
+  )
+  const outputRate = getSafeTokenCount(model?.outputTokenPriceMicros ?? model?.outputPriceMicros ?? model?.output_price_micros) ?? 0
+  const reserve = (BigInt(inputTokenBound) * BigInt(inputRate) + 999999n) / 1000000n
+    + (BigInt(outputCount) * BigInt(outputRate) + 999999n) / 1000000n
+  if (reserve > BigInt(Number.MAX_SAFE_INTEGER)) throw createHttpError('Agent 请求超出计费范围', 413, 'AGENT_CONTEXT_TOO_LARGE')
+  return Number(reserve)
+}
+
+function parseAgentResponseBody(body) {
+  try {
+    const payload = JSON.parse(body.toString('utf8'))
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+    return payload
+  } catch {
+    return null
+  }
+}
+
+function getRequiredAgentHeader(req, name, code) {
+  const value = String(req.headers[name] || '').trim()
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(value)) throw createHttpError(`Agent 请求缺少有效的 ${name}`, 400, code)
+  return value
+}
+
+export async function normalizeSuccessfulImageResponse(body, maxImagePixels, requestedImageSize = null) {
   let payload
   try {
     payload = JSON.parse(body.toString('utf8'))
@@ -197,6 +288,7 @@ async function normalizeSuccessfulImageResponse(body, maxImagePixels) {
     throw createHttpError('上游返回的图片响应无法解析', 502, 'INVALID_UPSTREAM_RESPONSE')
   }
   const items = Array.isArray(payload?.data) ? payload.data : []
+  let tierMismatch = null
   for (const item of items.slice(0, 4)) {
     if (!item || typeof item !== 'object' || typeof item.b64_json !== 'string') continue
     const value = item.b64_json.replace(/\s/g, '')
@@ -206,11 +298,36 @@ async function normalizeSuccessfulImageResponse(body, maxImagePixels) {
       const decoder = sharp(image, { failOn: 'error', limitInputPixels: maxImagePixels, sequentialRead: true })
       const metadata = await decoder.metadata()
       if (!metadata.width || !metadata.height || !['png', 'jpeg', 'webp'].includes(metadata.format || '')) continue
+      const expectedWidth = Number(requestedImageSize?.width) || 0
+      const expectedHeight = Number(requestedImageSize?.height) || 0
+      const expectedAspectRatio = expectedWidth > 0 && expectedHeight > 0 ? expectedWidth / expectedHeight : 0
+      const actualAspectRatio = metadata.width / metadata.height
+      const belowRequestedSize = expectedWidth > 0 && expectedHeight > 0 && (
+        metadata.width < Math.floor(expectedWidth * 0.9) ||
+        metadata.height < Math.floor(expectedHeight * 0.9) ||
+        Math.abs(actualAspectRatio / expectedAspectRatio - 1) > 0.12
+      )
+      if (belowRequestedSize) {
+        tierMismatch = {
+          actualWidth: metadata.width,
+          actualHeight: metadata.height,
+          expectedWidth,
+          expectedHeight,
+        }
+        continue
+      }
       await decoder.raw().toBuffer()
       return Buffer.from(JSON.stringify({ ...payload, data: [{ ...item, b64_json: value }] }))
     } catch {
       continue
     }
+  }
+  if (tierMismatch) {
+    throw createHttpError(
+      `上游返回 ${tierMismatch.actualWidth}x${tierMismatch.actualHeight}，低于请求尺寸 ${tierMismatch.expectedWidth}x${tierMismatch.expectedHeight}，本次不扣费`,
+      502,
+      'UPSTREAM_IMAGE_TIER_MISMATCH',
+    )
   }
   throw createHttpError('上游未返回可解码的完整图片，本次不扣费', 502, 'EMPTY_IMAGE_RESULT')
 }
@@ -256,8 +373,12 @@ function sendBufferedResponse(res, status, contentType, body, headers) {
 
 export class PlatformGateway {
   constructor(options = {}) {
-    this.baseUrl = options.baseUrl ? new URL(options.baseUrl) : null
-    this.apiKey = String(options.apiKey || '')
+    this.imageBaseUrl = options.imageBaseUrl || options.baseUrl ? new URL(options.imageBaseUrl || options.baseUrl) : null
+    this.imageApiKey = String(options.imageApiKey || options.apiKey || '')
+    this.agentBaseUrl = options.agentBaseUrl ? new URL(options.agentBaseUrl) : this.imageBaseUrl
+    this.agentApiKey = String(options.agentApiKey || (options.agentBaseUrl ? '' : this.imageApiKey))
+    this.baseUrl = this.imageBaseUrl
+    this.apiKey = this.imageApiKey
     this.db = options.db
     this.expectedOrigin = String(options.expectedOrigin || '')
     this.generationMinRole = Number.isFinite(Number(options.generationMinRole)) ? Number(options.generationMinRole) : 1
@@ -266,6 +387,9 @@ export class PlatformGateway {
     this.imageModel = options.imageModel || 'gpt-image-2'
     this.imageModels = options.imageModels || {}
     this.agentModel = options.agentModel || 'gpt-5.5'
+    this.agentMaxOutputTokens = Number(options.agentMaxOutputTokens) > 0 ? Math.trunc(Number(options.agentMaxOutputTokens)) : 4096
+    this.agentInputTokenOverhead = Number(options.agentInputTokenOverhead) >= 0 ? Math.trunc(Number(options.agentInputTokenOverhead)) : 8192
+    this.agentRoundStepLimit = Number(options.agentRoundStepLimit) > 0 ? Math.trunc(Number(options.agentRoundStepLimit)) : 16
     this.imagePriceMicros = Math.max(0, Number(options.imagePriceMicros) || 0)
     this.resultDir = resolve(options.resultDir || join('data', 'results'))
     this.maxImagePixels = Number(options.maxImagePixels) > 0 ? Number(options.maxImagePixels) : 40 * 1000 * 1000
@@ -273,6 +397,7 @@ export class PlatformGateway {
     this.secureCookies = Boolean(options.secureCookies)
     this.trustProxy = Boolean(options.trustProxy)
     this.maxRelayBodyBytes = Number(options.maxRelayBodyBytes) > 0 ? Number(options.maxRelayBodyBytes) : 128 * 1024 * 1024
+    this.maxAgentBodyBytes = Number(options.maxAgentBodyBytes) > 0 ? Number(options.maxAgentBodyBytes) : 4 * 1024 * 1024
     this.maxUpstreamBodyBytes = Number(options.maxUpstreamBodyBytes) > 0 ? Number(options.maxUpstreamBodyBytes) : 128 * 1024 * 1024
     this.maxConcurrentRelays = Number(options.maxConcurrentRelays) > 0 ? Number(options.maxConcurrentRelays) : 24
     this.maxQueuedRelaysPerUser = Number(options.maxQueuedRelaysPerUser) > 0 ? Number(options.maxQueuedRelaysPerUser) : 8
@@ -282,11 +407,14 @@ export class PlatformGateway {
     this.activeRelays = 0
     this.relayQueues = new Map()
     this.queuedRelaysByUser = new Map()
+    this.usageBlockedModels = new Set()
   }
 
   buildUrl(path) {
-    if (!this.baseUrl) throw createHttpError('尚未配置第三方中转接口', 503, 'RELAY_NOT_CONFIGURED')
-    return new URL(path.replace(/^\/+/, ''), `${this.baseUrl.toString().replace(/\/+$/, '')}/`)
+    const normalizedPath = path.replace(/^\/+/, '')
+    const baseUrl = normalizedPath === 'responses' ? this.agentBaseUrl : this.imageBaseUrl
+    if (!baseUrl) throw createHttpError('尚未配置第三方中转接口', 503, 'RELAY_NOT_CONFIGURED')
+    return new URL(normalizedPath, `${baseUrl.toString().replace(/\/+$/, '')}/`)
   }
 
   getClientIp(req) {
@@ -307,10 +435,9 @@ export class PlatformGateway {
 
   getCapabilities(user) {
     const groupAllowed = this.allowedGroups.size === 0 || this.allowedGroups.has(String(user.group))
-    const relayReady = Boolean(this.baseUrl)
     return {
-      generation: relayReady && groupAllowed && Number(user.status) === 1 && Number(user.role) >= this.generationMinRole,
-      agent: relayReady && groupAllowed && Number(user.status) === 1 && Number(user.role) >= this.agentMinRole,
+      generation: Boolean(this.imageBaseUrl) && groupAllowed && Number(user.status) === 1 && Number(user.role) >= this.generationMinRole,
+      agent: Boolean(this.agentBaseUrl) && groupAllowed && Number(user.status) === 1 && Number(user.role) >= this.agentMinRole,
       admin: Number(user.status) === 1 && Number(user.role) >= 10,
     }
   }
@@ -453,6 +580,160 @@ export class PlatformGateway {
     sendBufferedResponse(res, job.result_http_status || 200, job.result_content_type, body)
   }
 
+  async relayAgentResponse(req, res, normalized, user, controller) {
+    const conversationId = getRequiredAgentHeader(req, 'x-agent-conversation-id', 'AGENT_CONVERSATION_ID_REQUIRED')
+    const roundId = getRequiredAgentHeader(req, 'x-agent-round-id', 'AGENT_ROUND_ID_REQUIRED')
+    const stepKey = getRequiredAgentHeader(req, 'x-agent-step-key', 'AGENT_STEP_KEY_REQUIRED')
+    const payload = parseAgentResponseBody(normalized.body)
+    if (!payload) throw createHttpError('Agent 请求 JSON 无效', 400, 'INVALID_JSON')
+
+    const requestHash = createHash('sha256').update(normalized.requestHashBody || normalized.body).digest('hex')
+    const replayCall = this.db.getAgentCallByStep(user.id, stepKey)
+    if (replayCall) {
+      const replayRound = this.db.getBillingRoundById(user.id, replayCall.billingRoundId)
+      if (
+        replayCall.requestHash !== requestHash ||
+        replayCall.modelId !== payload.model ||
+        replayRound?.conversationId !== conversationId ||
+        replayRound?.roundId !== roundId
+      ) {
+        throw createHttpError('同一 Agent 请求标识不能用于不同内容、模型或轮次', 409, 'IDEMPOTENCY_CONFLICT')
+      }
+      res.setHeader('X-Agent-Call-Id', String(replayCall.id))
+      res.setHeader('X-Agent-Conversation-Id', conversationId)
+      res.setHeader('X-Agent-Round-Id', roundId)
+      if (replayCall.status === 'charged' && replayCall.resultBody) {
+        const stored = Buffer.isBuffer(replayCall.resultBody) ? replayCall.resultBody : Buffer.from(replayCall.resultBody)
+        sendBufferedResponse(res, replayCall.resultStatus || 200, replayCall.resultContentType || 'application/json; charset=utf-8', stored)
+        return
+      }
+      if (replayCall.status === 'failed') throw createHttpError(replayCall.error || '该 Agent 步骤此前已失败', 409, 'AGENT_CALL_FAILED')
+      res.statusCode = 202
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.setHeader('Retry-After', '2')
+      res.end(JSON.stringify({ success: true, data: { status: replayCall.status } }))
+      return
+    }
+
+    const model = this.db.getAgentModel(payload.model)
+    if (!model?.selectable) throw createHttpError('所选 Agent 模型未启用或尚未完成定价', 400, 'AGENT_MODEL_NOT_AVAILABLE')
+    if (this.usageBlockedModels.has(model.id)) throw createHttpError('该 Agent 模型的计费数据异常，已暂时停用', 503, 'AGENT_MODEL_USAGE_UNVERIFIED')
+    this.db.lockAgentConversation({ userId: user.id, conversationId, modelId: model.id })
+
+    const maxStepReserveMicros = Number(model.maxStepReserveMicros) || 0
+    if (maxStepReserveMicros <= 0) throw createHttpError('所选 Agent 模型尚未配置单步预留金额', 503, 'AGENT_MODEL_PRICING_INCOMPLETE')
+    const reserveMicros = calculateAgentRequestReserveMicros(model, normalized.body.length, payload.max_output_tokens, this.agentInputTokenOverhead)
+    if (reserveMicros > maxStepReserveMicros) {
+      throw createHttpError('Agent 上下文超过该模型的单步计费上限，请新建对话或减少输入内容', 413, 'AGENT_CONTEXT_TOO_LARGE')
+    }
+    const reservation = this.db.reserveAgentCall({
+      userId: user.id,
+      conversationId,
+      roundId,
+      stepKey,
+      requestHash,
+      modelId: model.id,
+      reserveMicros,
+      maxCallsPerRound: this.agentRoundStepLimit,
+    })
+    const call = reservation.call || reservation
+    res.setHeader('X-Agent-Call-Id', String(call.id))
+    res.setHeader('X-Agent-Conversation-Id', conversationId)
+    res.setHeader('X-Agent-Round-Id', roundId)
+
+    if (reservation.existing) {
+      if (call.status === 'charged' && call.resultBody) {
+        const stored = Buffer.isBuffer(call.resultBody) ? call.resultBody : Buffer.from(call.resultBody)
+        sendBufferedResponse(res, call.resultStatus || 200, call.resultContentType || 'application/json; charset=utf-8', stored)
+        return
+      }
+      if (call.status === 'failed') throw createHttpError(call.error || '该 Agent 步骤此前已失败', 409, 'AGENT_CALL_FAILED')
+      res.statusCode = 202
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.setHeader('Retry-After', '2')
+      res.end(JSON.stringify({ success: true, data: { status: call.status } }))
+      return
+    }
+
+    const headers = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...(this.agentApiKey ? { Authorization: `Bearer ${this.agentApiKey}` } : {}),
+    }
+    if (req.headers['openai-beta']) headers['OpenAI-Beta'] = req.headers['openai-beta']
+
+    let upstream
+    try {
+      this.db.markAgentCallSubmitted(call.id)
+      upstream = await this.fetch(this.buildUrl('responses'), {
+        method: 'POST',
+        headers,
+        body: normalized.body,
+        signal: controller.signal,
+        redirect: 'manual',
+      })
+    } catch (err) {
+      this.db.failAgentCall(call.id, err instanceof Error ? err.message : String(err))
+      throw err
+    }
+
+    let upstreamBody
+    try {
+      upstreamBody = await readUpstreamBody(upstream, Math.min(this.maxUpstreamBodyBytes, MAX_AGENT_RESULT_BYTES))
+    } catch (err) {
+      this.db.failAgentCall(call.id, err instanceof Error ? err.message : String(err))
+      throw err
+    }
+    if (!upstream.ok) {
+      this.db.failAgentCall(call.id, `Agent 上游请求失败（HTTP ${upstream.status}）`)
+      sendBufferedResponse(res, upstream.status, upstream.headers.get('content-type'), upstreamBody, upstream.headers)
+      return
+    }
+
+    const responsePayload = parseAgentResponseBody(upstreamBody)
+    const usage = parseAgentResponseUsage(responsePayload)
+    if (!responsePayload || !usage) {
+      this.usageBlockedModels.add(model.id)
+      this.db.failAgentCall(call.id, 'Agent 上游响应缺少可核验的 usage，未向用户收费')
+      throw createHttpError('Agent 上游未返回有效计费数据，该模型已暂时停用', 502, 'INVALID_AGENT_USAGE')
+    }
+
+    const chargeMicros = calculateAgentChargeMicros(model, usage)
+    if (chargeMicros > reserveMicros) {
+      this.usageBlockedModels.add(model.id)
+      this.db.failAgentCall(call.id, 'Agent 实际费用超过单步预留上限，未向用户收费')
+      throw createHttpError('Agent 本轮上下文超出计费上限，请新建对话或联系管理员', 502, 'AGENT_BILLING_LIMIT_EXCEEDED')
+    }
+
+    const resultPayload = {
+      ...responsePayload,
+      image_studio_billing: {
+        model: model.id,
+        input_tokens: usage.inputTokens,
+        cached_input_tokens: usage.cachedInputTokens,
+        output_tokens: usage.outputTokens,
+        charge_micros: chargeMicros,
+        currency: 'CNY',
+      },
+    }
+    const resultBody = Buffer.from(JSON.stringify(resultPayload))
+    try {
+      this.db.settleAgentCall(call.id, {
+        ...usage,
+        chargeMicros,
+        upstreamId: typeof responsePayload.id === 'string' ? responsePayload.id : null,
+        resultStatus: upstream.status,
+        resultContentType: 'application/json; charset=utf-8',
+        resultBody,
+      })
+    } catch (err) {
+      this.db.failAgentCall(call.id, err instanceof Error ? err.message : String(err))
+      throw err
+    }
+    res.setHeader('X-Agent-Charge-Micros', String(chargeMicros))
+    sendBufferedResponse(res, upstream.status, 'application/json; charset=utf-8', resultBody, upstream.headers)
+  }
+
   async relay(req, res, path) {
     const normalizedPath = path.replace(/^\/+/, '').replace(/\/+$/, '')
     if (req.method !== 'POST' || !isAllowedRelayPath(normalizedPath)) {
@@ -464,7 +745,9 @@ export class PlatformGateway {
     this.assertCsrf(req)
     const session = this.getSession(req)
     const user = session.user
-    if (String(req.headers['x-image-studio-user'] || '') !== String(user.id)) {
+    // 旧请求头仅用于平滑升级，所有新客户端统一发送 KunAI 请求头。
+    const requestUser = req.headers['x-kunai-user'] || req.headers['x-image-studio-user']
+    if (String(requestUser || '') !== String(user.id)) {
       throw createHttpError('账户已在其他页面切换，请刷新后重试', 409, 'USER_CONTEXT_CHANGED')
     }
     this.authorizeRelay(user, normalizedPath)
@@ -483,35 +766,46 @@ export class PlatformGateway {
       clearTimeout(timeoutId)
       timeoutPhase = 'relay'
       timeoutId = setTimeout(() => controller.abort(), this.relayTimeoutMs)
-      const requestBody = await readRequestBody(req, this.maxRelayBodyBytes)
+      const requestBody = await readRequestBody(req, normalizedPath === 'responses' ? this.maxAgentBodyBytes : this.maxRelayBodyBytes)
       const contentType = String(req.headers['content-type'] || '')
       const normalized = await normalizeRelayRequest(normalizedPath, contentType, requestBody, {
         imageModel: this.imageModel,
         imageModels: this.imageModels,
         agentModel: this.agentModel,
+        agentMaxOutputTokens: this.agentMaxOutputTokens,
       })
       const headers = {
         Accept: req.headers.accept || 'application/json',
-        ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+        ...(this.imageApiKey ? { Authorization: `Bearer ${this.imageApiKey}` } : {}),
         ...(normalized.contentType ? { 'Content-Type': normalized.contentType } : {}),
       }
       if (req.headers['openai-beta']) headers['OpenAI-Beta'] = req.headers['openai-beta']
 
       if (normalizedPath === 'responses') {
-        const upstream = await this.fetch(this.buildUrl(normalizedPath), {
-          method: 'POST',
-          headers,
-          body: normalized.body,
-          signal: controller.signal,
-          redirect: 'manual',
-        })
-        await sendUpstreamResponse(upstream, res)
+        req.removeListener('aborted', abortBeforeSubmit)
+        res.removeListener('close', abortBeforeSubmit)
+        await this.relayAgentResponse(req, res, normalized, user, controller)
         return
       }
 
       const idempotencyKey = String(req.headers['x-idempotency-key'] || '')
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(idempotencyKey)) {
         throw createHttpError('生成请求缺少有效的幂等标识', 400, 'INVALID_IDEMPOTENCY_KEY')
+      }
+      const agentConversationHeader = String(req.headers['x-agent-conversation-id'] || '').trim()
+      const agentRoundHeader = String(req.headers['x-agent-round-id'] || '').trim()
+      if (Boolean(agentConversationHeader) !== Boolean(agentRoundHeader)) {
+        throw createHttpError('Agent 图片请求上下文不完整', 400, 'INVALID_AGENT_IMAGE_CONTEXT')
+      }
+      const billingRound = agentConversationHeader
+        ? this.db.getBillingRound({
+            userId: user.id,
+            conversationId: getRequiredAgentHeader(req, 'x-agent-conversation-id', 'INVALID_AGENT_CONVERSATION_ID'),
+            roundId: getRequiredAgentHeader(req, 'x-agent-round-id', 'INVALID_AGENT_ROUND_ID'),
+          })
+        : null
+      if (agentConversationHeader && !billingRound) {
+        throw createHttpError('Agent 计费轮次不存在', 409, 'INVALID_AGENT_IMAGE_CONTEXT')
       }
       await this.ensureResultCapacity()
       const requestHash = await hashNormalizedRelayRequest(normalizedPath, normalized)
@@ -520,9 +814,10 @@ export class PlatformGateway {
         idempotencyKey,
         requestHash,
         priceMicros: this.imagePriceMicros,
+        billingRoundId: billingRound?.id ?? null,
       })
       job = reservation.job
-      res.setHeader('X-Image-Studio-Request-Id', idempotencyKey)
+      res.setHeader('X-KunAI-Request-Id', idempotencyKey)
       if (reservation.existing) {
         if (job.status === 'charged') {
           const stored = await this.readResult(job)
@@ -555,7 +850,7 @@ export class PlatformGateway {
       }
 
       const upstreamBody = await readUpstreamBody(upstream, this.maxUpstreamBodyBytes)
-      const resultBody = await normalizeSuccessfulImageResponse(upstreamBody, this.maxImagePixels)
+      const resultBody = await normalizeSuccessfulImageResponse(upstreamBody, this.maxImagePixels, normalized.requestedImageSize)
       const result = await this.writeResult(job.id, resultBody)
       this.db.settleGeneration(job.id, {
         path: result.filename,

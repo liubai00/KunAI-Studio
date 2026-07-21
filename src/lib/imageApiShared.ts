@@ -20,6 +20,7 @@ export interface CallApiOptions {
   onFalRequestEnqueued?: (request: { requestId: string; endpoint: string }) => void
   onCustomTaskEnqueued?: (task: { taskId: string }) => void
   platformRequestIds?: string[]
+  platformAgentContext?: { conversationId: string; roundId: string }
   onPlatformRequestStarted?: (request: { requestId: string; requestIndex: number }) => void | Promise<void>
   onPartialImage?: (partial: { image: string; partialImageIndex?: number; requestIndex?: number }) => void
 }

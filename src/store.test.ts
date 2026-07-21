@@ -4,6 +4,7 @@ import { DEFAULT_PARAMS } from './types'
 import { createDefaultFalProfile, createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
 import type { AgentConversation, ExportData, StoredImage, StoredImageThumbnail, TaskRecord } from './types'
 import { getSelectedImageMentionLabel } from './lib/promptImageMentions'
+import { createPlatformSettings, PLATFORM_IMAGE_PROFILE_ID } from './lib/platformMode'
 vi.mock('./lib/db', () => {
   const tasks = new Map<string, TaskRecord>()
   const images = new Map<string, StoredImage>()
@@ -110,6 +111,14 @@ vi.mock('./lib/transparentImage', () => ({
 vi.mock('./lib/agentApi', () => ({
   callAgentConversationTitleApi: vi.fn(async () => '标题'),
   callAgentResponsesApi: vi.fn(() => new Promise(() => {})),
+  callPlatformSearchWeb: vi.fn(async (opts: { input: { query: string } }) => ({
+    ok: true,
+    query: opts.input.query,
+    results: [{ title: '搜索结果', url: 'https://example.com/', snippet: '摘要' }],
+    billing: { charge_micros: 100000, currency: 'CNY' },
+  })),
+  finishPlatformAgentRound: vi.fn(async () => undefined),
+  isPlatformAgentCallFailedError: vi.fn(() => false),
   callBatchImageSingle: vi.fn(async (opts: { batchItemId: string; prompt: string }) => ({
     batchItemId: opts.batchItemId,
     image: { dataUrl: 'data:image/png;base64,batch-output', revisedPrompt: opts.prompt },
@@ -127,8 +136,9 @@ vi.mock('./lib/agentApi', () => ({
     }
   }),
 }))
-import { clearAgentConversations, clearImages, clearTasks, getAllAgentConversations, getAllTasks, getImage, putAgentConversation, putImage, putTask as putDbTask } from './lib/db'
-import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
+import { clearAgentConversations, clearImages, clearTasks, getAllAgentConversations, getAllTasks, getImage, putAgentConversation, putImage, putImageThumbnail, putTask as putDbTask } from './lib/db'
+import { callAgentResponsesApi, callBatchImageSingle, callPlatformSearchWeb, finishPlatformAgentRound } from './lib/agentApi'
+import { callImageApi } from './lib/api'
 import { getFalQueuedImageResult } from './lib/falAiImageApi'
 import { removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
 import { cleanStaleAgentInputDrafts, clearFailedTasks, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getAgentConversationTaskIds, getAgentRoundTaskIds, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, stopAgentResponse, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
@@ -293,6 +303,39 @@ describe('mask draft lifecycle in store actions', () => {
     const state = useStore.getState()
     expect(state.tasks).toHaveLength(1)
     expect(state.showToast).toHaveBeenCalledWith('任务已提交', 'success')
+  })
+
+  it.each([
+    ['high', 'auto', 'high', '2880x2880'],
+    ['auto', '1440x2160', 'medium', '1440x2160'],
+  ] as const)('normalizes persisted platform quality %s and size %s before submission', async (quality, size, expectedQuality, expectedSize) => {
+    const { callImageApi } = await import('./lib/api')
+    vi.mocked(callImageApi).mockClear()
+    vi.mocked(callImageApi).mockResolvedValueOnce({
+      images: ['data:image/png;base64,platform-normalized'],
+      actualParams: {},
+      actualParamsList: [{}],
+      revisedPrompts: [],
+    })
+    useStore.setState({
+      settings: createPlatformSettings(DEFAULT_SETTINGS),
+      prompt: 'platform normalized params',
+      params: { ...DEFAULT_PARAMS, quality, size },
+    })
+
+    await submitTask()
+    for (let i = 0; i < 5 && vi.mocked(callImageApi).mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(callImageApi).toHaveBeenCalledWith(expect.objectContaining({
+      params: expect.objectContaining({ quality: expectedQuality, size: expectedSize }),
+    }))
+    const state = useStore.getState()
+    expect(state.params).toMatchObject({ quality: expectedQuality, size: expectedSize })
+    expect(state.tasks[0].params).toMatchObject({ quality: expectedQuality, size: expectedSize })
+    await clearTasks()
+    await clearImages()
   })
 
   it('stores decoded image size as actual size when the API omits size', async () => {
@@ -578,6 +621,24 @@ describe('input persistence setting', () => {
 describe('agent conversation persistence', () => {
   beforeEach(async () => {
     await clearAgentConversations()
+    useStore.setState({ agentConversations: [], activeAgentConversationId: null })
+  })
+
+  it('enables web search for new conversations by default', () => {
+    const id = useStore.getState().createAgentConversation()
+
+    expect(useStore.getState().agentConversations.find((conversation) => conversation.id === id)?.searchEnabled).toBe(true)
+  })
+
+  it('defaults legacy conversations to search enabled and preserves an explicit opt-out', async () => {
+    await putAgentConversation(agentConversation({ id: 'legacy-default' }))
+    await putAgentConversation(agentConversation({ id: 'explicit-disabled', searchEnabled: false }))
+
+    await initStore()
+
+    const conversations = useStore.getState().agentConversations
+    expect(conversations.find((conversation) => conversation.id === 'legacy-default')?.searchEnabled).toBe(true)
+    expect(conversations.find((conversation) => conversation.id === 'explicit-disabled')?.searchEnabled).toBe(false)
   })
 
   it('omits agent conversations from localStorage state', () => {
@@ -972,7 +1033,7 @@ describe('fal task recovery', () => {
     expect(toolOutput?.output).toContain('quota exceeded')
   })
 
-  it('does not call Agent again when recovered tasks already reached the tool limit', async () => {
+  it('requests one tool-free summary when recovered tasks already reached the tool limit', async () => {
     const textProfile = createDefaultOpenAIProfile({ id: 'agent-text-profile', apiKey: 'text-key', apiMode: 'responses' })
     const imageProfile = createDefaultFalProfile({ id: 'fal-profile', apiKey: 'fal-key' })
     const agentTask = task({
@@ -1024,6 +1085,12 @@ describe('fal task recovery', () => {
       actualParamsList: [{}],
       revisedPrompts: [],
     })
+    vi.mocked(callAgentResponsesApi).mockResolvedValueOnce({
+      text: 'recovered final summary',
+      images: [],
+      outputItems: [{ type: 'message', content: [{ type: 'output_text', text: 'recovered final summary' }] }],
+      responseId: 'response-recovered-final',
+    })
     useStore.setState({
       settings: normalizeSettings({
         ...DEFAULT_SETTINGS,
@@ -1047,10 +1114,117 @@ describe('fal task recovery', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
 
-    expect(callAgentResponsesApi).not.toHaveBeenCalled()
+    expect(callAgentResponsesApi).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(callAgentResponsesApi).mock.calls[0][0].disableTools).toBe(true)
     const round = useStore.getState().agentConversations[0].rounds[0]
-    expect(round).toMatchObject({ status: 'done', error: null })
+    expect(round).toMatchObject({ status: 'done', error: null, responseId: 'response-recovered-final' })
+    expect(useStore.getState().agentConversations[0].messages.find((message) => message.id === 'assistant-a')?.content).toContain('recovered final summary')
     expect(useStore.getState().agentConversations[0].messages.find((message) => message.id === 'assistant-a')?.content).toContain('已达到最大工具调用次数（1）')
+  })
+
+  it('finishes a recovered two-item batch when the remaining item exceeded a one-call limit', async () => {
+    const textProfile = createDefaultOpenAIProfile({ id: 'agent-text-profile', apiKey: 'text-key', apiMode: 'responses' })
+    const imageProfile = createDefaultFalProfile({ id: 'fal-profile', apiKey: 'fal-key' })
+    const agentTask = task({
+      id: 'agent-fal-batch-task',
+      prompt: '生成第一张图',
+      apiProvider: 'fal',
+      apiProfileId: imageProfile.id,
+      apiProfileName: imageProfile.name,
+      apiModel: imageProfile.model,
+      status: 'error',
+      error: '与 fal.ai 的连接已断开',
+      falRequestId: 'batch-limit-request-id',
+      falEndpoint: 'fal-endpoint',
+      falRecoverable: true,
+      sourceMode: 'agent',
+      agentConversationId: 'conversation-a',
+      agentRoundId: 'round-a',
+      agentMessageId: 'assistant-a',
+      agentToolCallId: 'batch-item-tool-a',
+      agentBatchCallId: 'batch-tool-a',
+      finishedAt: Date.now(),
+      elapsed: 10,
+    })
+    const conversation = agentConversation({
+      id: 'conversation-a',
+      activeRoundId: 'round-a',
+      rounds: [{
+        id: 'round-a',
+        index: 1,
+        parentRoundId: null,
+        userMessageId: 'user-a',
+        assistantMessageId: 'assistant-a',
+        prompt: '生成两张图',
+        inputImageIds: [],
+        outputTaskIds: [agentTask.id],
+        responseOutput: [{
+          type: 'function_call',
+          name: 'generate_image_batch',
+          call_id: 'batch-tool-a',
+          arguments: JSON.stringify({
+            images: [
+              { id: 'image-1', prompt: '生成第一张图' },
+              { id: 'image-2', prompt: '生成第二张图' },
+            ],
+          }),
+        }],
+        responseSteps: 1,
+        status: 'running',
+        error: null,
+        createdAt: 1,
+        finishedAt: null,
+      }],
+      messages: [
+        { id: 'user-a', role: 'user', content: '生成两张图', roundId: 'round-a', createdAt: 1 },
+        { id: 'assistant-a', role: 'assistant', content: '', roundId: 'round-a', outputTaskIds: [agentTask.id], createdAt: 2 },
+      ],
+    })
+    vi.mocked(getFalQueuedImageResult).mockResolvedValueOnce({
+      images: ['data:image/png;base64,agent-recovered-batch-limit'],
+      actualParams: {},
+      actualParamsList: [{}],
+      revisedPrompts: [],
+    })
+    vi.mocked(callAgentResponsesApi).mockResolvedValueOnce({
+      text: '批量恢复后的最终总结',
+      images: [],
+      outputItems: [{ type: 'message', content: [{ type: 'output_text', text: '批量恢复后的最终总结' }] }],
+      responseId: 'response-recovered-batch-final',
+    })
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        profiles: [textProfile, imageProfile],
+        activeProfileId: textProfile.id,
+        agentApiConfigMode: 'hybrid',
+        agentTextProfileId: textProfile.id,
+        agentImageProfileId: imageProfile.id,
+        agentMaxToolRounds: 1,
+      }),
+      tasks: [],
+      agentConversations: [],
+      activeAgentConversationId: conversation.id,
+      showToast: vi.fn(),
+    })
+    await putDbTask(agentTask)
+    await putAgentConversation(conversation)
+
+    await initStore()
+    for (let i = 0; i < 20 && useStore.getState().agentConversations[0]?.rounds[0]?.status !== 'done'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    const recoveredRound = useStore.getState().agentConversations[0].rounds[0]
+    const output = recoveredRound.responseOutput?.find((item) => item.type === 'function_call_output')?.output
+    expect(callAgentResponsesApi).toHaveBeenCalledTimes(1)
+    expect(recoveredRound).toMatchObject({ status: 'done', error: null })
+    expect(JSON.parse(output ?? '{}')).toEqual({
+      images: [
+        { id: 'image-1', status: 'done' },
+        { id: 'image-2', status: 'error', error: 'Tool limit reached' },
+      ],
+    })
   })
 
   it('does not continue a stopped Agent round when a recoverable fal task later completes', async () => {
@@ -1949,6 +2123,140 @@ describe('agent context for removed outputs', () => {
     expect(serializedInput).toContain('input_image')
   })
 
+  it('uses stored thumbnails instead of full 4K images for Agent history context', async () => {
+    await putImage({
+      id: 'image-4k-history',
+      dataUrl: 'data:image/png;base64,FULL_4K_PAYLOAD_SHOULD_NOT_BE_SENT',
+      width: 2304,
+      height: 3456,
+    })
+    await putImageThumbnail({
+      id: 'image-4k-history',
+      thumbnailDataUrl: 'data:image/webp;base64,AGENT_HISTORY_THUMBNAIL',
+      width: 512,
+      height: 768,
+      thumbnailVersion: 2,
+    })
+    useStore.setState((state) => ({
+      tasks: [task({
+        id: 'task-live',
+        outputImages: ['image-4k-history'],
+        sourceMode: 'agent',
+        agentRoundId: 'round-a',
+        agentToolCallId: 'live-call',
+      })],
+      agentConversations: state.agentConversations.map((conversation) => ({
+        ...conversation,
+        rounds: conversation.rounds.map((round) => round.id === 'round-a'
+          ? { ...round, outputTaskIds: ['task-live'] }
+          : round),
+      })),
+    }))
+
+    await submitAgentMessage()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const input = vi.mocked(callAgentResponsesApi).mock.calls[0][0].input
+    const serializedInput = JSON.stringify(input)
+    expect(serializedInput).toContain('AGENT_HISTORY_THUMBNAIL')
+    expect(serializedInput).not.toContain('FULL_4K_PAYLOAD_SHOULD_NOT_BE_SENT')
+  })
+
+  it('keeps total Agent history thumbnails within budget and prioritizes recent images', async () => {
+    const imageIds = Array.from({ length: 15 }, (_, index) => `history-image-${index}`)
+    for (let index = 0; index < imageIds.length; index += 1) {
+      await putImageThumbnail({
+        id: imageIds[index],
+        thumbnailDataUrl: `data:image/webp;base64,IMG_${index}_${'A'.repeat(300 * 1024)}`,
+        width: 720,
+        height: 720,
+        thumbnailVersion: 2,
+      })
+    }
+    useStore.setState((state) => ({
+      tasks: [task({
+        id: 'task-live',
+        outputImages: imageIds,
+        sourceMode: 'agent',
+        agentRoundId: 'round-a',
+        agentToolCallId: 'live-call',
+      })],
+      agentConversations: state.agentConversations.map((conversation) => ({
+        ...conversation,
+        rounds: conversation.rounds.map((round) => round.id === 'round-a'
+          ? { ...round, outputTaskIds: ['task-live'] }
+          : round),
+      })),
+    }))
+
+    await submitAgentMessage()
+    for (let i = 0; i < 10 && vi.mocked(callAgentResponsesApi).mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    const input = vi.mocked(callAgentResponsesApi).mock.calls[0][0].input
+    const imageUrls: string[] = []
+    const visit = (value: unknown) => {
+      if (Array.isArray(value)) {
+        value.forEach(visit)
+        return
+      }
+      if (!value || typeof value !== 'object') return
+      for (const [key, item] of Object.entries(value)) {
+        if (key === 'image_url' && typeof item === 'string' && item.startsWith('data:image')) imageUrls.push(item)
+        else visit(item)
+      }
+    }
+    visit(input)
+    const serializedInput = JSON.stringify(input)
+    expect(imageUrls.reduce((total, value) => total + value.length, 0)).toBeLessThanOrEqual(2 * 1024 * 1024)
+    expect(imageUrls.some((value) => value.includes('IMG_14_'))).toBe(true)
+    expect(imageUrls.some((value) => value.includes('IMG_0_'))).toBe(false)
+    expect(serializedInput).toContain('round-1-image-1')
+    expect(serializedInput).toContain('round-1-image-15')
+    expect(serializedInput).toContain('image_omitted')
+  })
+
+  it('rejects oversized Agent history images when no thumbnail is available', async () => {
+    const largeDataUrl = `data:image/png;base64,${'A'.repeat(256 * 1024)}`
+    await putImage({
+      id: 'image-4k-without-thumbnail',
+      dataUrl: largeDataUrl,
+      width: 2304,
+      height: 3456,
+    })
+    useStore.setState((state) => ({
+      tasks: [task({
+        id: 'task-live',
+        outputImages: ['image-4k-without-thumbnail'],
+        sourceMode: 'agent',
+        agentRoundId: 'round-a',
+        agentToolCallId: 'live-call',
+      })],
+      agentConversations: state.agentConversations.map((conversation) => ({
+        ...conversation,
+        rounds: conversation.rounds.map((round) => round.id === 'round-a'
+          ? { ...round, outputTaskIds: ['task-live'] }
+          : round),
+      })),
+    }))
+
+    await submitAgentMessage()
+    for (let i = 0; i < 10; i += 1) {
+      const rounds = useStore.getState().agentConversations[0].rounds
+      if (rounds[rounds.length - 1]?.status === 'error') break
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(callAgentResponsesApi).not.toHaveBeenCalled()
+    const conversation = useStore.getState().agentConversations[0]
+    const failedRound = conversation.rounds[conversation.rounds.length - 1]
+    expect(failedRound).toMatchObject({ status: 'error' })
+    expect(failedRound?.error).toMatch(/历史图片过大.*上下文缩略图/)
+    expect(conversation.messages.find((message) => message.roundId === failedRound?.id && message.role === 'assistant')?.content)
+      .toMatch(/历史图片过大.*上下文缩略图/)
+  })
+
   it('restores stripped image_generation results from task payloads when building context', async () => {
     await putImage({ id: 'image-live', dataUrl: 'data:image/png;base64,live-base64' })
     const rawResponsePayload = JSON.stringify({
@@ -2423,6 +2731,107 @@ describe('agent built-in image tool failure', () => {
       outputTaskIds: [failedTask.id],
     })
   })
+
+  it('shows a localized Agent message for network failures', async () => {
+    vi.mocked(callAgentResponsesApi).mockRejectedValueOnce(new TypeError('fetch failed'))
+
+    await submitAgentMessage()
+    for (let i = 0; i < 10 && useStore.getState().agentConversations[0].rounds[0]?.status !== 'error'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    const conversation = useStore.getState().agentConversations[0]
+    expect(conversation.rounds[0].error).toContain('无法连接 Agent 服务')
+    expect(conversation.rounds[0].error).not.toContain('fetch failed')
+    expect(conversation.messages.find((message) => message.role === 'assistant')?.content).toContain('无法连接 Agent 服务')
+  })
+
+  it('preserves partial output and requests one tool-free summary after exhausting the tool budget', async () => {
+    useStore.setState((state) => ({
+      settings: normalizeSettings({ ...state.settings, agentMaxToolRounds: 1 }),
+    }))
+    vi.mocked(callAgentResponsesApi)
+      .mockResolvedValueOnce({
+        text: 'partial result before the limit',
+        images: [],
+        outputItems: [
+          { type: 'message', content: [{ type: 'output_text', text: 'partial result before the limit' }] },
+          { type: 'function_call', name: 'continue_generation', call_id: 'continue-1', arguments: '{}' },
+        ],
+        responseId: 'response-partial',
+      })
+      .mockResolvedValueOnce({
+        text: 'final summary without tools',
+        images: [],
+        outputItems: [{ type: 'message', content: [{ type: 'output_text', text: 'final summary without tools' }] }],
+        responseId: 'response-final',
+      })
+
+    await submitAgentMessage()
+    for (let i = 0; i < 10 && useStore.getState().agentConversations[0].rounds[0]?.status !== 'done'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(callAgentResponsesApi).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(callAgentResponsesApi).mock.calls[1][0].disableTools).toBe(true)
+    const continuationInput = vi.mocked(callAgentResponsesApi).mock.calls[1][0].input as Array<Record<string, unknown>>
+    const functionOutput = continuationInput.find((item) => item.type === 'function_call_output')
+    expect(JSON.parse(String(functionOutput?.output))).toEqual({ status: 'continued' })
+    const conversation = useStore.getState().agentConversations[0]
+    const content = conversation.messages.find((message) => message.role === 'assistant')?.content
+    expect(content).toContain('partial result before the limit')
+    expect(content).toContain('final summary without tools')
+    expect(conversation.rounds[0]).toMatchObject({ status: 'done', responseId: 'response-final' })
+  })
+
+  it('replays an incomplete streamed response instead of finalizing its partial message', async () => {
+    useStore.setState((state) => ({
+      settings: normalizeSettings({ ...state.settings, agentMaxToolRounds: 2 }),
+    }))
+    vi.mocked(callAgentResponsesApi)
+      .mockResolvedValueOnce({
+        text: '',
+        images: [],
+        outputItems: [{ type: 'function_call', name: 'continue_generation', call_id: 'continue-before-interrupt', arguments: '{}' }],
+        responseId: 'response-before-interrupt',
+      })
+      .mockImplementationOnce(async (opts) => {
+        opts.onOutputItems?.([{
+          id: 'partial-final-message',
+          type: 'message',
+          content: [{ type: 'output_text', text: '不完整的最终回答' }],
+        }])
+        throw new TypeError('fetch failed')
+      })
+      .mockResolvedValueOnce({
+        text: '完整的最终回答',
+        images: [],
+        outputItems: [{ id: 'complete-final-message', type: 'message', content: [{ type: 'output_text', text: '完整的最终回答' }] }],
+        responseId: 'response-after-replay',
+      })
+
+    await submitAgentMessage()
+    for (let i = 0; i < 10 && useStore.getState().agentConversations[0].rounds[0]?.status !== 'error'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    const failedRound = useStore.getState().agentConversations[0].rounds[0]
+    expect(callAgentResponsesApi).toHaveBeenCalledTimes(2)
+    expect(failedRound.responseOutputPendingFrom).toBe(2)
+    expect(JSON.stringify(failedRound.responseOutput)).toContain('不完整的最终回答')
+
+    await regenerateAgentAssistantMessage('conversation-a', failedRound.id)
+    for (let i = 0; i < 10 && useStore.getState().agentConversations[0].rounds[0].status !== 'done'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    const completedRound = useStore.getState().agentConversations[0].rounds[0]
+    expect(callAgentResponsesApi).toHaveBeenCalledTimes(3)
+    expect(completedRound.responseOutputPendingFrom).toBeUndefined()
+    expect(JSON.stringify(completedRound.responseOutput)).not.toContain('不完整的最终回答')
+    expect(useStore.getState().agentConversations[0].messages.find((message) => message.role === 'assistant')?.content)
+      .toBe('完整的最终回答')
+  })
 })
 
 describe('agent batch reference resolution', () => {
@@ -2592,12 +3001,69 @@ describe('agent batch reference resolution', () => {
     expect(batchArgs.referenceImageDataUrls).toEqual([imageA.dataUrl])
     expect(batchArgs.referenceIds).toEqual(['round-3-reference-1'])
   })
+
+  it('keeps the batch image response payload when a streaming callback completed the task first', async () => {
+    vi.mocked(callBatchImageSingle).mockImplementationOnce(async (opts) => {
+      const image = { dataUrl: 'data:image/png;base64,streamed-batch-1024x1024', revisedPrompt: opts.prompt }
+      await opts.onImageToolCompleted?.(image)
+      return {
+        batchItemId: opts.batchItemId,
+        image,
+        error: null,
+        rawResponsePayload: 'batch-image-raw-response',
+      }
+    })
+    vi.mocked(callAgentResponsesApi)
+      .mockResolvedValueOnce({
+        text: '',
+        images: [],
+        outputItems: [{
+          type: 'function_call',
+          name: 'generate_image_batch',
+          call_id: 'batch-call-with-raw',
+          arguments: JSON.stringify({ images: [{ id: 'image-1', prompt: '生成批量图片' }] }),
+        }],
+        responseId: 'response-batch-tool',
+      })
+      .mockResolvedValueOnce({
+        text: '批量图片已完成',
+        images: [],
+        outputItems: [{ type: 'message', content: [{ type: 'output_text', text: '批量图片已完成' }] }],
+        responseId: 'response-batch-summary',
+        rawResponsePayload: 'final-text-raw-response',
+      })
+
+    await submitAgentMessage()
+    for (let i = 0; i < 10 && !useStore.getState().agentConversations[0].rounds.some((round) => round.status === 'done' && round.responseId === 'response-batch-summary'); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    const batchTask = useStore.getState().tasks.find((item) => item.agentBatchCallId === 'batch-call-with-raw')
+    expect(batchTask).toMatchObject({ status: 'done', rawResponsePayload: 'batch-image-raw-response' })
+  })
 })
 
 describe('agent assistant regeneration', () => {
   const responsesProfile = createDefaultOpenAIProfile({ id: 'openai-responses', apiKey: 'openai-key', apiMode: 'responses' })
 
   beforeEach(() => {
+    vi.mocked(callAgentResponsesApi).mockReset()
+    vi.mocked(callAgentResponsesApi).mockImplementation(() => new Promise(() => {}))
+    vi.mocked(callPlatformSearchWeb).mockReset()
+    vi.mocked(callPlatformSearchWeb).mockResolvedValue({
+      ok: true,
+      query: '查询',
+      results: [{ title: '搜索结果', url: 'https://example.com/', snippet: '摘要' }],
+      billing: { charge_micros: 100000, currency: 'CNY' },
+    })
+    vi.mocked(callImageApi).mockReset()
+    vi.mocked(callImageApi).mockResolvedValue({
+      images: [],
+      actualParams: {},
+      actualParamsList: [],
+      revisedPrompts: [],
+    })
+    vi.mocked(finishPlatformAgentRound).mockClear()
     useStore.setState({
       settings: normalizeSettings({
         ...DEFAULT_SETTINGS,
@@ -2606,6 +3072,7 @@ describe('agent assistant regeneration', () => {
         alwaysShowRetryButton: false,
       }),
       params: { ...DEFAULT_PARAMS, n: 4 },
+      tasks: [],
       agentEditingRoundId: 'round-a',
       agentConversations: [
         agentConversation({
@@ -2704,6 +3171,332 @@ describe('agent assistant regeneration', () => {
       content: '',
       outputTaskIds: [],
     })
+  })
+
+  it('finalizes a persisted final Agent response without another billed model call', async () => {
+    useStore.setState({
+      agentConversations: [agentConversation({
+        id: 'conversation-a',
+        activeRoundId: 'round-a',
+        rounds: [{
+          id: 'round-a',
+          index: 1,
+          parentRoundId: null,
+          userMessageId: 'user-a',
+          assistantMessageId: 'assistant-a',
+          prompt: '总结',
+          inputImageIds: [],
+          outputTaskIds: [],
+          responseOutput: [{ type: 'message', content: [{ type: 'output_text', text: '已经完成的最终回答' }] }],
+          responseSteps: 1,
+          requestAttemptId: 'attempt-a',
+          status: 'error',
+          error: '上次请求已中断',
+          createdAt: 1,
+          finishedAt: 2,
+        }],
+        messages: [
+          { id: 'user-a', role: 'user', content: '总结', roundId: 'round-a', createdAt: 1 },
+          { id: 'assistant-a', role: 'assistant', content: '请求失败：上次请求已中断', roundId: 'round-a', createdAt: 2 },
+        ],
+      })],
+    })
+
+    await regenerateAgentAssistantMessage('conversation-a', 'round-a')
+    for (let i = 0; i < 10 && useStore.getState().agentConversations[0].rounds[0].status !== 'done'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(callAgentResponsesApi).not.toHaveBeenCalled()
+    expect(useStore.getState().agentConversations[0].rounds[0]).toMatchObject({ status: 'done', error: null })
+    expect(useStore.getState().agentConversations[0].messages.find((message) => message.id === 'assistant-a')?.content)
+      .toBe('已经完成的最终回答')
+  })
+
+  it('replays a paid built-in image response when its task was not persisted', async () => {
+    vi.mocked(callAgentResponsesApi).mockResolvedValueOnce({
+      text: '',
+      images: [{
+        toolCallId: 'built-in-image-paid',
+        dataUrl: 'data:image/png;base64,replayed-built-in-1024x1024',
+        revisedPrompt: '恢复内置生图',
+        actualParams: { size: '1024x1024' },
+      }],
+      outputItems: [{ id: 'built-in-image-paid', type: 'image_generation_call', status: 'completed' }],
+      responseId: 'response-built-in-replayed',
+    })
+    useStore.setState({
+      agentConversations: [agentConversation({
+        id: 'conversation-a',
+        activeRoundId: 'round-a',
+        rounds: [{
+          id: 'round-a',
+          index: 1,
+          parentRoundId: null,
+          userMessageId: 'user-a',
+          assistantMessageId: 'assistant-a',
+          prompt: '恢复内置生图',
+          inputImageIds: [],
+          outputTaskIds: [],
+          responseOutput: [{ id: 'built-in-image-paid', type: 'image_generation_call', status: 'completed' }],
+          responseSteps: 1,
+          requestAttemptId: 'attempt-a',
+          status: 'error',
+          error: '请求中断',
+          createdAt: 1,
+          finishedAt: 2,
+        }],
+        messages: [
+          { id: 'user-a', role: 'user', content: '恢复内置生图', roundId: 'round-a', createdAt: 1 },
+          { id: 'assistant-a', role: 'assistant', content: '请求失败：请求中断', roundId: 'round-a', createdAt: 2 },
+        ],
+      })],
+    })
+
+    await regenerateAgentAssistantMessage('conversation-a', 'round-a')
+    for (let i = 0; i < 10 && useStore.getState().agentConversations[0].rounds[0].status !== 'done'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(callAgentResponsesApi).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().tasks).toHaveLength(1)
+    expect(useStore.getState().tasks[0]).toMatchObject({
+      status: 'done',
+      agentToolCallId: 'built-in-image-paid',
+      outputImages: [expect.any(String)],
+    })
+    expect(useStore.getState().agentConversations[0].rounds[0]).toMatchObject({
+      status: 'done',
+      responseSteps: 1,
+    })
+  })
+
+  it('replays a pending persisted search with its original call id before resuming', async () => {
+    vi.mocked(callAgentResponsesApi).mockResolvedValueOnce({
+      text: '搜索后的总结',
+      images: [],
+      outputItems: [{ type: 'message', content: [{ type: 'output_text', text: '搜索后的总结' }] }],
+      responseId: 'response-after-search',
+    })
+    useStore.setState((state) => ({
+      settings: normalizeSettings({ ...state.settings, agentMaxToolRounds: 1 }),
+      agentConversations: [agentConversation({
+        id: 'conversation-a',
+        activeRoundId: 'round-a',
+        rounds: [{
+          id: 'round-a',
+          index: 1,
+          parentRoundId: null,
+          userMessageId: 'user-a',
+          assistantMessageId: 'assistant-a',
+          prompt: '搜索当前信息',
+          inputImageIds: [],
+          outputTaskIds: [],
+          responseOutput: [{
+            type: 'function_call',
+            name: 'search_web',
+            call_id: 'search-call-original',
+            arguments: JSON.stringify({ query: '当前信息', topic: 'general', time_range: 'none' }),
+          }],
+          responseSteps: 1,
+          requestAttemptId: 'attempt-a',
+          status: 'error',
+          error: '上次请求已中断',
+          createdAt: 1,
+          finishedAt: 2,
+        }],
+        messages: [
+          { id: 'user-a', role: 'user', content: '搜索当前信息', roundId: 'round-a', createdAt: 1 },
+          { id: 'assistant-a', role: 'assistant', content: '请求失败：上次请求已中断', roundId: 'round-a', createdAt: 2 },
+        ],
+      })],
+    }))
+
+    await regenerateAgentAssistantMessage('conversation-a', 'round-a')
+    for (let i = 0; i < 10 && useStore.getState().agentConversations[0].rounds[0].status !== 'done'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(callPlatformSearchWeb).toHaveBeenCalledTimes(1)
+    expect(callPlatformSearchWeb).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: 'conversation-a',
+      roundId: 'round-a',
+      callId: 'search-call-original',
+    }))
+    expect(callAgentResponsesApi).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(callAgentResponsesApi).mock.calls[0][0].disableTools).toBe(true)
+    expect(JSON.stringify(vi.mocked(callAgentResponsesApi).mock.calls[0][0].input)).toContain('function_call_output')
+    expect(useStore.getState().agentConversations[0].rounds[0]).toMatchObject({ status: 'done', error: null })
+  })
+
+  it('replays an unsubmitted interrupted platform image once at a one-call limit', async () => {
+    vi.mocked(callImageApi).mockResolvedValueOnce({
+      images: ['data:image/png;base64,recovered-1024x1024'],
+      actualParams: { size: '1024x1024' },
+      actualParamsList: [{ size: '1024x1024' }],
+      revisedPrompts: ['恢复单图'],
+    })
+    vi.mocked(callAgentResponsesApi).mockResolvedValueOnce({
+      text: '恢复完成',
+      images: [],
+      outputItems: [{ type: 'message', content: [{ type: 'output_text', text: '恢复完成' }] }],
+      responseId: 'response-after-image',
+    })
+    const interruptedTask = task({
+      id: 'interrupted-image-task',
+      apiProfileId: PLATFORM_IMAGE_PROFILE_ID,
+      sourceMode: 'agent',
+      agentConversationId: 'conversation-a',
+      agentRoundId: 'round-a',
+      agentToolCallId: 'image-call-original',
+      status: 'error',
+      error: '请求中断',
+      outputImages: [],
+    })
+    useStore.setState((state) => ({
+      settings: normalizeSettings({
+        ...state.settings,
+        agentApiConfigMode: 'hybrid',
+        agentTextProfileId: responsesProfile.id,
+        agentImageProfileId: responsesProfile.id,
+        agentMaxToolRounds: 1,
+      }),
+      tasks: [interruptedTask],
+      agentConversations: [agentConversation({
+        id: 'conversation-a',
+        activeRoundId: 'round-a',
+        rounds: [{
+          id: 'round-a',
+          index: 1,
+          parentRoundId: null,
+          userMessageId: 'user-a',
+          assistantMessageId: 'assistant-a',
+          prompt: '恢复图片',
+          inputImageIds: [],
+          outputTaskIds: [interruptedTask.id],
+          responseOutput: [
+            {
+              type: 'function_call',
+              name: 'continue_generation',
+              call_id: 'continue-before-image',
+              arguments: '{}',
+            },
+            {
+              type: 'function_call',
+              name: 'generate_image',
+              call_id: 'image-call-original',
+              arguments: JSON.stringify({ id: 'image-1', prompt: '恢复图片' }),
+            },
+          ],
+          responseSteps: 1,
+          requestAttemptId: 'attempt-a',
+          status: 'error',
+          error: '请求中断',
+          createdAt: 1,
+          finishedAt: 2,
+        }],
+        messages: [
+          { id: 'user-a', role: 'user', content: '恢复图片', roundId: 'round-a', createdAt: 1 },
+          { id: 'assistant-a', role: 'assistant', content: '请求失败：请求中断', roundId: 'round-a', outputTaskIds: [interruptedTask.id], createdAt: 2 },
+        ],
+      })],
+    }))
+
+    await regenerateAgentAssistantMessage('conversation-a', 'round-a')
+    for (let i = 0; i < 10 && useStore.getState().agentConversations[0].rounds[0].status !== 'done'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(callImageApi).toHaveBeenCalledTimes(1)
+    expect(callAgentResponsesApi).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(callAgentResponsesApi).mock.calls[0][0].disableTools).toBe(true)
+    expect(useStore.getState().tasks[0]).toMatchObject({ status: 'done', error: null })
+    const functionOutput = useStore.getState().agentConversations[0].rounds[0].responseOutput
+      ?.find((item) => item.type === 'function_call_output')?.output
+    expect(JSON.parse(functionOutput ?? '{}')).toMatchObject({ id: 'image-1', status: 'done' })
+    const continueOutput = useStore.getState().agentConversations[0].rounds[0].responseOutput
+      ?.find((item) => item.type === 'function_call_output' && item.call_id === 'continue-before-image')?.output
+    expect(JSON.parse(continueOutput ?? '{}')).toEqual({ status: 'error', error: 'Tool limit reached' })
+  })
+
+  it('replays an unsubmitted interrupted platform batch item once at a one-call limit', async () => {
+    vi.mocked(callImageApi).mockResolvedValueOnce({
+      images: ['data:image/png;base64,recovered-batch-1024x1024'],
+      actualParams: { size: '1024x1024' },
+      actualParamsList: [{ size: '1024x1024' }],
+      revisedPrompts: ['恢复批量图片'],
+    })
+    vi.mocked(callAgentResponsesApi).mockResolvedValueOnce({
+      text: '批量恢复完成',
+      images: [],
+      outputItems: [{ type: 'message', content: [{ type: 'output_text', text: '批量恢复完成' }] }],
+      responseId: 'response-after-batch',
+    })
+    const interruptedTask = task({
+      id: 'interrupted-batch-task',
+      apiProfileId: PLATFORM_IMAGE_PROFILE_ID,
+      sourceMode: 'agent',
+      agentConversationId: 'conversation-a',
+      agentRoundId: 'round-a',
+      agentToolCallId: 'batch-item-call-original',
+      agentBatchCallId: 'batch-call-original',
+      status: 'error',
+      error: '请求中断',
+      outputImages: [],
+    })
+    useStore.setState((state) => ({
+      settings: normalizeSettings({
+        ...state.settings,
+        agentApiConfigMode: 'hybrid',
+        agentTextProfileId: responsesProfile.id,
+        agentImageProfileId: responsesProfile.id,
+        agentMaxToolRounds: 1,
+      }),
+      tasks: [interruptedTask],
+      agentConversations: [agentConversation({
+        id: 'conversation-a',
+        activeRoundId: 'round-a',
+        rounds: [{
+          id: 'round-a',
+          index: 1,
+          parentRoundId: null,
+          userMessageId: 'user-a',
+          assistantMessageId: 'assistant-a',
+          prompt: '恢复批量图片',
+          inputImageIds: [],
+          outputTaskIds: [interruptedTask.id],
+          responseOutput: [{
+            type: 'function_call',
+            name: 'generate_image_batch',
+            call_id: 'batch-call-original',
+            arguments: JSON.stringify({ images: [{ id: 'image-1', prompt: '恢复批量图片' }] }),
+          }],
+          responseSteps: 1,
+          requestAttemptId: 'attempt-a',
+          status: 'error',
+          error: '请求中断',
+          createdAt: 1,
+          finishedAt: 2,
+        }],
+        messages: [
+          { id: 'user-a', role: 'user', content: '恢复批量图片', roundId: 'round-a', createdAt: 1 },
+          { id: 'assistant-a', role: 'assistant', content: '请求失败：请求中断', roundId: 'round-a', outputTaskIds: [interruptedTask.id], createdAt: 2 },
+        ],
+      })],
+    }))
+
+    await regenerateAgentAssistantMessage('conversation-a', 'round-a')
+    for (let i = 0; i < 10 && useStore.getState().agentConversations[0].rounds[0].status !== 'done'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(callImageApi).toHaveBeenCalledTimes(1)
+    expect(callAgentResponsesApi).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(callAgentResponsesApi).mock.calls[0][0].disableTools).toBe(true)
+    expect(useStore.getState().tasks[0]).toMatchObject({ status: 'done', error: null })
+    const functionOutput = useStore.getState().agentConversations[0].rounds[0].responseOutput
+      ?.find((item) => item.type === 'function_call_output')?.output
+    expect(JSON.parse(functionOutput ?? '{}')).toMatchObject({ images: [{ id: 'image-1', status: 'done' }] })
   })
 })
 

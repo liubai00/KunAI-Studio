@@ -4,13 +4,17 @@ import nodemailer from 'nodemailer'
 import { hashToken, normalizeEmail } from './platformDb.mjs'
 
 const scrypt = promisify(scryptCallback)
-const LOCAL_SESSION_COOKIE = 'image_studio_session'
-const SECURE_SESSION_COOKIE = '__Host-image_studio_session'
-const LOCAL_CSRF_COOKIE = 'image_studio_csrf'
-const SECURE_CSRF_COOKIE = '__Host-image_studio_csrf'
+const LOCAL_SESSION_COOKIE = 'kunai_studio_session'
+const SECURE_SESSION_COOKIE = '__Host-kunai_studio_session'
+const LOCAL_CSRF_COOKIE = 'kunai_studio_csrf'
+const SECURE_CSRF_COOKIE = '__Host-kunai_studio_csrf'
+const LEGACY_LOCAL_SESSION_COOKIE = 'image_studio_session'
+const LEGACY_SECURE_SESSION_COOKIE = '__Host-image_studio_session'
+const LEGACY_LOCAL_CSRF_COOKIE = 'image_studio_csrf'
+const LEGACY_SECURE_CSRF_COOKIE = '__Host-image_studio_csrf'
 const PASSWORD_KEY_BYTES = 64
 const SCRYPT_COST = 32768
-const DUMMY_PASSWORD_SALT = Buffer.from('image-studio-login-dummy-salt')
+const DUMMY_PASSWORD_SALT = Buffer.from('kunai-studio-login-dummy-salt')
 const DUMMY_PASSWORD_HASH = `scrypt$${SCRYPT_COST}$${DUMMY_PASSWORD_SALT.toString('base64url')}$${scryptSync('not-a-real-password', DUMMY_PASSWORD_SALT, PASSWORD_KEY_BYTES, {
   N: SCRYPT_COST,
   r: 8,
@@ -84,7 +88,10 @@ export function parseCookies(value = '') {
 
 export function getSessionToken(req, secureOnly = false) {
   const cookies = parseCookies(req.headers.cookie)
-  return cookies[SECURE_SESSION_COOKIE] || (secureOnly ? '' : cookies[LOCAL_SESSION_COOKIE]) || ''
+  return cookies[SECURE_SESSION_COOKIE]
+    || cookies[LEGACY_SECURE_SESSION_COOKIE]
+    || (secureOnly ? '' : cookies[LOCAL_SESSION_COOKIE] || cookies[LEGACY_LOCAL_SESSION_COOKIE])
+    || ''
 }
 
 export function getCsrfToken(req) {
@@ -119,6 +126,10 @@ export function clearAuthCookies(secure) {
     createCookie(LOCAL_CSRF_COOKIE, '', { clear: true }),
     createCookie(SECURE_SESSION_COOKIE, '', { httpOnly: true, secure: true, clear: true }),
     createCookie(SECURE_CSRF_COOKIE, '', { secure: true, clear: true }),
+    createCookie(LEGACY_LOCAL_SESSION_COOKIE, '', { httpOnly: true, clear: true }),
+    createCookie(LEGACY_LOCAL_CSRF_COOKIE, '', { clear: true }),
+    createCookie(LEGACY_SECURE_SESSION_COOKIE, '', { httpOnly: true, secure: true, clear: true }),
+    createCookie(LEGACY_SECURE_CSRF_COOKIE, '', { secure: true, clear: true }),
   ]
 }
 
@@ -141,7 +152,7 @@ function createMailer(options) {
 export class PlatformAuth {
   constructor(options) {
     this.db = options.db
-    this.systemName = options.systemName || 'Image Studio'
+    this.systemName = options.systemName || 'KunAI Studio'
     this.production = Boolean(options.production)
     this.secret = String(options.secret || '')
     this.sessionTtlMs = Number(options.sessionTtlMs) || 30 * 24 * 60 * 60 * 1000
@@ -336,7 +347,7 @@ export class PlatformAuth {
 export function createAuthOptionsFromEnv(env, options = {}) {
   return {
     ...options,
-    systemName: env.PLATFORM_SYSTEM_NAME || 'Image Studio',
+    systemName: env.PLATFORM_SYSTEM_NAME || 'KunAI Studio',
     production: env.NODE_ENV === 'production',
     secret: env.PLATFORM_AUTH_SECRET || (env.NODE_ENV === 'production' ? '' : 'development-only-secret-change-me'),
     sessionTtlMs: Number(env.PLATFORM_SESSION_TTL_DAYS || 30) * 24 * 60 * 60 * 1000,

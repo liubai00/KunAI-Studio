@@ -1,5 +1,8 @@
 import type { ApiProfile, TaskParams } from '../../types'
 import { dismissAllTooltips } from '../../lib/tooltipDismiss'
+import { calculateImageSizeForTier, getImageSizeTier } from '../../lib/size'
+import { getQualityValueForSizeTier, getSizeTierForQuality } from '../../lib/quality'
+import { PLATFORM_IMAGE_PROFILE_ID } from '../../lib/platformMode'
 import Select from '../Select'
 import ButtonTooltip from './buttonTooltip'
 
@@ -128,9 +131,19 @@ export default function InputParamsPanel({
       >
         <span className="text-ink-3 ml-1 text-[11px] font-medium">质量</span>
         <Select
-          value={activeProfile.codexCli ? 'auto' : isFalProvider && params.quality === 'auto' ? 'high' : params.quality}
+          value={activeProfile.codexCli
+            ? 'auto'
+            : params.quality === 'auto' && activeProfile.id === PLATFORM_IMAGE_PROFILE_ID
+              ? getQualityValueForSizeTier(getImageSizeTier(params.size))
+              : isFalProvider && params.quality === 'auto' ? 'high' : params.quality}
           onChange={(val) => {
-            if (!activeProfile.codexCli) setParams({ quality: val as TaskParams['quality'] })
+            if (activeProfile.codexCli) return
+            const quality = val as TaskParams['quality']
+            const tier = activeProfile.id === PLATFORM_IMAGE_PROFILE_ID ? getSizeTierForQuality(quality) : null
+            setParams({
+              quality,
+              ...(tier ? { size: calculateImageSizeForTier(tier, params.size) } : {}),
+            })
           }}
           options={qualityOptions}
           disabled={activeProfile.codexCli}
@@ -179,8 +192,8 @@ export default function InputParamsPanel({
               setParams({ transparent_output: val === 'on', output_compression: null })
             }}
             options={[
-              { label: 'false', value: 'off' },
-              { label: 'true', value: 'on' },
+              { label: '关闭', value: 'off' },
+              { label: '开启', value: 'on' },
             ]}
             className={selectClass}
             onOpenChange={onTransparentOutputMenuOpenChange}
@@ -238,8 +251,8 @@ export default function InputParamsPanel({
             if (!moderationDisabled) setParams({ moderation: val as TaskParams['moderation'] })
           }}
           options={[
-            { label: 'auto', value: 'auto' },
-            { label: 'low', value: 'low' },
+            { label: '自动', value: 'auto' },
+            { label: '宽松', value: 'low' },
           ]}
           disabled={moderationDisabled}
           className={moderationDisabled

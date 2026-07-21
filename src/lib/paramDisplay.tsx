@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TaskParams, TaskRecord } from '../types'
 import ViewportTooltip from '../components/ViewportTooltip'
+import { getQualityDisplayLabel } from './quality'
 
 type ParamKey = keyof TaskParams
 
@@ -64,22 +65,28 @@ export function ActualValueBadge({ value, className = '', variant = 'highlight' 
 }
 
 export function getParamDisplay(task: TaskRecord, paramKey: ParamKey, actualParams = task.actualParams) {
-  const requestedValue = task.sourceMode === 'agent' && paramKey === 'n'
+  const requestedRawValue = task.sourceMode === 'agent' && paramKey === 'n'
     ? 'auto'
     : task.params[paramKey]
   const actualValue = actualParams?.[paramKey]
   const hasActualValue = actualValue !== undefined && actualValue !== null
-  const displayValue = hasActualValue ? actualValue : requestedValue
+  const displayRawValue = hasActualValue ? actualValue : requestedRawValue
   const isMismatch =
     hasActualValue &&
-    requestedValue !== 'auto' &&
-    String(actualValue) !== String(requestedValue)
+    requestedRawValue !== 'auto' &&
+    String(actualValue) !== String(requestedRawValue)
+  const displayValue = paramKey === 'quality'
+    ? getQualityDisplayLabel(String(displayRawValue))
+    : String(displayRawValue)
+  const requestedValue = paramKey === 'quality'
+    ? getQualityDisplayLabel(String(requestedRawValue))
+    : String(requestedRawValue)
 
   return {
-    displayValue: String(displayValue),
+    displayValue,
     isMismatch,
-    requestedValue: String(requestedValue),
-    isAutoResolved: hasActualValue && requestedValue === 'auto' && String(actualValue) !== String(requestedValue),
+    requestedValue,
+    isAutoResolved: hasActualValue && requestedRawValue === 'auto' && String(actualValue) !== String(requestedRawValue),
   }
 }
 

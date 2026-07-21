@@ -2,6 +2,9 @@
 
 export type ApiMode = 'images' | 'responses'
 export type AppMode = 'gallery' | 'agent'
+export type ShellView = 'create' | 'agent' | 'library' | 'account' | 'settings' | 'admin'
+export type MainShellView = Extract<ShellView, 'create' | 'agent' | 'library'>
+export type AdminSection = 'overview' | 'users' | 'products' | 'models' | 'redemption'
 export type AgentApiConfigMode = 'off' | 'native' | 'hybrid'
 export type ReferenceImageEditAction = 'ask' | 'replace-reference' | 'add-mask'
 export const ZIP_DOWNLOAD_ROUTE_VALUES = [
@@ -275,15 +278,35 @@ export interface AgentRound {
   outputTaskIds: string[]
   responseId?: string
   responseOutput?: ResponsesOutputItem[]
+  responseOutputPendingFrom?: number
+  requestAttemptId?: string
+  responseSteps?: number
+  billing?: AgentRoundBilling
   status: AgentRoundStatus
   error: string | null
   createdAt: number
   finishedAt: number | null
 }
 
+export interface AgentRoundBilling {
+  model?: string
+  imageCount?: number
+  imageCreditsUsed?: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  textChargeMicros: number
+  searchChargeMicros: number
+  searchCalls: number
+  totalMicros: number
+  currency: 'CNY'
+}
+
 export interface AgentConversation {
   id: string
   title: string
+  modelId?: string
+  searchEnabled?: boolean
   activeRoundId?: string | null
   createdAt: number
   updatedAt: number
