@@ -1,10 +1,12 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useStore, getCachedImage, ensureImageCached } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { useModalFocus } from '../hooks/useModalFocus'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { suppressGlobalClicks } from '../lib/clickSuppression'
 import { downloadImageIds } from '../lib/downloadImages'
+import GlobalModal from './GlobalModal'
 
 const MIN_SCALE = 1
 const MAX_SCALE = 10
@@ -174,6 +176,7 @@ interface LightboxInnerProps {
 /** 内部组件：保证挂载时 DOM 已经存在，所有 ref / effect 都可靠 */
 function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, currentIndex, total, onPrev, onNext }: LightboxInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  useModalFocus(true, containerRef)
   const openedAtRef = useRef(Date.now())
 
   // 用 ref 追踪最新变换，避免闭包过期
@@ -606,15 +609,19 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
     'lb-nav absolute top-1/2 -translate-y-1/2 grid place-items-center w-[50px] h-[50px] rounded-full bg-white/10 text-white hover:bg-white/[.22] transition-colors z-10'
 
   return (
-    <div
-      ref={containerRef}
-      data-lightbox-root
-      className="fixed inset-0 z-[60] flex flex-col select-none"
-      style={{ cursor: isZoomed ? (isDragging ? 'grabbing' : 'grab') : 'pointer' }}
-      onClick={onClick}
-      onDoubleClick={onDoubleClick}
-    >
-      <div className="absolute inset-0 bg-[rgba(9,8,7,0.93)] backdrop-blur-[9px] animate-fade-in" />
+    <GlobalModal layer="lightbox" onClose={onClose} closeOnBackdrop={false} backdropClassName="!bg-[rgba(9,8,7,0.93)] backdrop-blur-[9px] animate-fade-in">
+      <div
+        ref={containerRef}
+        data-lightbox-root
+        role="dialog"
+        aria-modal="true"
+        aria-label="图片预览"
+        tabIndex={-1}
+        className="absolute inset-0 z-10 flex flex-col select-none outline-none"
+        style={{ cursor: isZoomed ? (isDragging ? 'grabbing' : 'grab') : 'pointer' }}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+      >
 
       {/* 顶部工具栏：左侧计数（等宽），右侧操作按钮 */}
       <div className="relative z-10 flex-none flex h-[58px] items-center justify-between px-[18px]">
@@ -704,7 +711,8 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
           </span>
         </div>
       )}
-    </div>
+      </div>
+    </GlobalModal>
   )
 
   function goPrev() { onPrev() }

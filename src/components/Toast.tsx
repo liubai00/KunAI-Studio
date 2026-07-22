@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 
 export default function Toast() {
@@ -41,12 +42,13 @@ export default function Toast() {
     }
   }
 
-  return (
-    <div className="fixed bottom-24 left-1/2 z-[120] pointer-events-none toast-enter">
+  return createPortal(
+    <div className="fixed bottom-24 left-1/2 z-[var(--layer-toast)] pointer-events-none toast-enter">
       <div className={`flex items-center gap-2.5 w-max max-w-[calc(100vw-32px)] sm:max-w-[min(44rem,80vw)] px-5 py-3.5 bg-surface border border-line2 border-l-[3px] ${accentBorder} rounded-xl shadow-lift text-sm font-medium text-ink`}>
         <span className="flex-shrink-0">{getIcon()}</span>
         <span className="leading-5 whitespace-pre-line text-center">{toast.message}</span>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

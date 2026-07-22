@@ -52,6 +52,12 @@
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-left: env(safe-area-inset-left, 0px);
+  /* 全局交互层级：所有全屏弹层通过 Portal 挂载到 body，避免受应用壳层影响。 */
+  --layer-dropdown: 70;
+  --layer-overlay: 100;
+  --layer-modal: 110;
+  --layer-dialog: 120;
+  --layer-toast: 130;
   scrollbar-gutter: stable;
 }
 
@@ -75,6 +81,28 @@ body {
     radial-gradient(circle at 14% 28%, rgba(99, 102, 241, 0.2), transparent 34%),
     radial-gradient(circle at 82% 16%, rgba(34, 211, 238, 0.13), transparent 28%),
     linear-gradient(145deg, #eef2ff 0%, #f8faff 48%, #ecfeff 120%);
+}
+
+.kunai-global-layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-modal);
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kunai-global-layer-dialog { z-index: var(--layer-dialog); }
+.kunai-global-layer-lightbox { z-index: var(--layer-dialog); }
+
+.kunai-global-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: rgba(5, 8, 24, 0.74);
+  backdrop-filter: blur(8px);
+  animation: overlay-in 0.2s ease-out both;
 }
 
 .auth-shell::before,

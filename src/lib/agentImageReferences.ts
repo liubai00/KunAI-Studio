@@ -22,10 +22,11 @@ export function getAgentRemovedReferenceTag(referenceId: string) {
 
 export function collectAgentRoundOutputImageSlots(round: AgentRound, tasks: TaskRecord[]) {
   const slots: Array<string | null> = []
+  const removedTaskIds = new Set(round.removedOutputTaskIds ?? [])
   for (const taskId of round.outputTaskIds) {
     const task = tasks.find((item) => item.id === taskId)
     if (!task) {
-      slots.push(null)
+      if (removedTaskIds.has(taskId)) slots.push(null)
       continue
     }
     slots.push(...task.outputImages)

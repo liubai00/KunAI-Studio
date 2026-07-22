@@ -1,8 +1,10 @@
-import { createPortal } from 'react-dom'
+import { useRef } from 'react'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { useModalFocus } from '../hooks/useModalFocus'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { CloseIcon } from './icons'
+import GlobalModal from './GlobalModal'
 
 export default function SupportPromptModal() {
   const supportPromptOpen = useStore((s) => s.supportPromptOpen)
@@ -12,6 +14,7 @@ export default function SupportPromptModal() {
   const lightboxImageId = useStore((s) => s.lightboxImageId)
   const showSettings = useStore((s) => s.showSettings)
   const maskEditorImageId = useStore((s) => s.maskEditorImageId)
+  const modalRef = useRef<HTMLDivElement>(null)
 
   const blockedByHigherPriorityModal = Boolean(
     confirmDialog || detailTaskId || lightboxImageId || showSettings || maskEditorImageId,
@@ -19,20 +22,20 @@ export default function SupportPromptModal() {
   const visible = supportPromptOpen && !blockedByHigherPriorityModal
 
   useCloseOnEscape(visible, dismissSupportPrompt)
-  usePreventBackgroundScroll(visible)
+  useModalFocus(visible, modalRef)
+  usePreventBackgroundScroll(visible, modalRef)
 
   if (!visible) return null
 
-  return createPortal(
-    <div
-      data-no-drag-select
-      className="fixed inset-0 z-[70] flex items-center justify-center p-4"
-      onClick={dismissSupportPrompt}
-    >
-      <div className="absolute inset-0 bg-[rgba(12,11,9,0.55)] backdrop-blur-sm animate-overlay-in" />
+  return (
+    <GlobalModal onClose={dismissSupportPrompt} className="p-4">
       <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="support-prompt-title"
+        tabIndex={-1}
         className="relative z-10 w-full max-w-sm rounded-[22px] border border-line2 bg-surface p-6 pb-7 shadow-lift animate-modal-in flex flex-col"
-        onClick={(event) => event.stopPropagation()}
       >
         <div className="absolute right-4 top-4">
           <button
@@ -53,7 +56,7 @@ export default function SupportPromptModal() {
           </div>
         </div>
 
-        <h3 className="mb-3 text-center font-display text-xl font-bold text-ink">
+        <h3 id="support-prompt-title" className="mb-3 text-center font-display text-xl font-bold text-ink">
           感谢使用 🎉
         </h3>
 
@@ -88,7 +91,6 @@ export default function SupportPromptModal() {
           </a>
         </div>
       </div>
-    </div>,
-    document.body,
+    </GlobalModal>
   )
 }

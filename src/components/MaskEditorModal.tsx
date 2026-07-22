@@ -7,7 +7,9 @@ import { blobToDataUrl } from '../lib/dataUrl'
 import { storeImage } from '../lib/db'
 import { prepareMaskTargetDataUrl, replaceMaskTargetImage } from '../lib/maskPreprocess'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { useModalFocus } from '../hooks/useModalFocus'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
+import GlobalModal from './GlobalModal'
 import {
   clampViewTransform,
   clientPointToCanvasPoint,
@@ -102,6 +104,7 @@ export default function MaskEditorModal() {
   const showToast = useStore((s) => s.showToast)
 
   const imageCanvasRef = useRef<HTMLCanvasElement>(null)
+  const modalRef = useRef<HTMLDivElement>(null)
   const previewCanvasRef = useRef<HTMLCanvasElement>(null)
   const maskCanvasRef = useRef<HTMLCanvasElement>(null)
   const cursorCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -145,7 +148,8 @@ export default function MaskEditorModal() {
     setMaskEditorImageId(null)
   }
   useCloseOnEscape(Boolean(imageId), close)
-  usePreventBackgroundScroll(Boolean(imageId))
+  useModalFocus(Boolean(imageId), modalRef)
+  usePreventBackgroundScroll(Boolean(imageId), modalRef)
 
   useEffect(() => () => {
     if (maskInfoTimerRef.current != null) {
@@ -834,7 +838,8 @@ export default function MaskEditorModal() {
 
   return (
     <>
-      <div data-no-drag-select className="fixed inset-0 z-[80] flex flex-col bg-surface animate-modal-in">
+      <GlobalModal closeOnBackdrop={false} className="!items-stretch !justify-stretch">
+      <div ref={modalRef} data-no-drag-select role="dialog" aria-modal="true" aria-labelledby="mask-editor-title" tabIndex={-1} className="relative z-10 flex h-full w-full flex-col bg-surface animate-modal-in">
       {/* Header */}
       <div className="flex-none flex h-14 items-center justify-between px-5 border-b border-line bg-surface z-20">
         <div className="flex items-center gap-3">
@@ -1000,10 +1005,11 @@ export default function MaskEditorModal() {
           </div>
         </div>
       </div>
+      </GlobalModal>
       {showBrushControls && sliderAnchor && createPortal(
         <div
           ref={brushSizePanelRef}
-          className="fixed z-[100] h-44 w-14 -translate-x-1/2 bg-surface rounded-xl shadow-lift border border-line"
+          className="fixed z-[var(--layer-dialog)] h-44 w-14 -translate-x-1/2 bg-surface rounded-xl shadow-lift border border-line"
           style={{ left: sliderAnchor.left, bottom: sliderAnchor.bottom }}
         >
           <input

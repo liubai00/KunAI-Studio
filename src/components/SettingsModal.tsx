@@ -33,6 +33,7 @@ import { useModalFocus } from '../hooks/useModalFocus'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { DEFAULT_DROPDOWN_MAX_HEIGHT, getDropdownMaxHeight } from '../lib/dropdown'
 import Select from './Select'
+import GlobalModal from './GlobalModal'
 import { Checkbox } from './Checkbox'
 import ViewportTooltip from './ViewportTooltip'
 import { ChevronDownIcon, CloseIcon, CopyIcon, PlusIcon, TrashIcon, ExportIcon, ImportIcon, DragHandleIcon, LinkIcon } from './icons'
@@ -1172,11 +1173,7 @@ export default function SettingsModal() {
   }
 
   return (
-        <div data-no-drag-select className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-[rgba(12,11,9,0.55)] backdrop-blur-sm animate-overlay-in"
-        onClick={handleClose}
-      />
+    <GlobalModal onClose={handleClose} className="p-4">
       <div
         ref={settingsScrollBoundaryRef}
         role="dialog"
@@ -2265,6 +2262,6 @@ export default function SettingsModal() {
           </div>,
           document.body,
         )}
-    </div>
+    </GlobalModal>
   )
 }

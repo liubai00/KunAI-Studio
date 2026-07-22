@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { calculateImageSize, normalizeImageSize, parseRatio, type SizeTier } from '../lib/size'
+import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { useModalFocus } from '../hooks/useModalFocus'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
+import GlobalModal from './GlobalModal'
 import ViewportTooltip from './ViewportTooltip'
 
 const TIERS: SizeTier[] = ['1K', '2K', '4K']
@@ -44,30 +47,10 @@ function findPresetForSize(size: string) {
 }
 
 export default function SizePickerModal({ currentSize, onSelect, onClose, allowAuto = true }: Props) {
-  usePreventBackgroundScroll(true)
-
   const modalRef = useRef<HTMLDivElement>(null)
-  const mouseDownTargetRef = useRef<EventTarget | null>(null)
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    mouseDownTargetRef.current = e.target
-  }
-
-  const handleMouseUp = (e: React.MouseEvent) => {
-    const mouseDownTarget = mouseDownTargetRef.current
-    const mouseUpTarget = e.target
-
-    if (
-      modalRef.current &&
-      mouseDownTarget &&
-      !modalRef.current.contains(mouseDownTarget as Node) &&
-      mouseUpTarget &&
-      !modalRef.current.contains(mouseUpTarget as Node)
-    ) {
-      onClose()
-    }
-    mouseDownTargetRef.current = null
-  }
+  useCloseOnEscape(true, onClose)
+  useModalFocus(true, modalRef)
+  usePreventBackgroundScroll(true, modalRef)
 
   const currentPreset = findPresetForSize(currentSize)
   const currentParsedSize = parseSize(currentSize)
@@ -167,20 +150,18 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
   }
 
   return (
-    <div
-      data-no-drag-select
-      className="fixed inset-0 z-[70] flex items-center justify-center p-4"
-      onMouseDown={handleMouseDown}
-      onMouseUp={handleMouseUp}
-    >
-      <div className="absolute inset-0 bg-[rgba(12,11,9,0.55)] backdrop-blur-sm animate-overlay-in" />
+    <GlobalModal onClose={onClose} className="p-4">
       <div
         ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="size-picker-title"
+        tabIndex={-1}
         className="relative z-10 w-full max-w-md rounded-[22px] border border-line2 bg-surface p-5 shadow-lift animate-modal-in"
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
-            <h3 className="font-display text-base font-semibold text-ink">设置图像尺寸</h3>
+            <h3 id="size-picker-title" className="font-display text-base font-semibold text-ink">设置图像尺寸</h3>
             <p className="mt-1 text-xs text-ink-3">当前：<span className="font-mono">{currentSize || 'auto'}</span></p>
           </div>
           <button
@@ -388,6 +369,6 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
           </button>
         </div>
       </div>
-    </div>
+    </GlobalModal>
   )
 }

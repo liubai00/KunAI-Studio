@@ -6,6 +6,8 @@ import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboar
 import { collectWebSearchCalls, getAgentRoundOutputItems, getWebSearchStatusForCalls, type AgentWebSearchStatus } from '../lib/agentWebSearch'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { isPlatformModeEnabled } from '../lib/platformMode'
+import { getVisibleAgentRoundTaskSlots, type AgentRoundTaskSlot } from '../lib/agentTaskReferences'
+import { getTaskImageDescription } from '../lib/taskDescription'
 import { usePlatformStore } from '../platformStore'
 import { downloadImageEntriesAsZip, downloadImageIds, getImageZipEntries } from '../lib/downloadImages'
 import TaskCard from './TaskCard'
@@ -112,11 +114,6 @@ type AgentAssistantBlock =
   | { type: 'image-task'; task: TaskRecord; key: string }
   | { type: 'deleted-image-task'; taskId: string; key: string }
   | { type: 'text'; key: string; content?: string }
-
-interface AgentRoundTaskSlot {
-  taskId: string
-  task: TaskRecord | null
-}
 
 function isAgentRoundInterrupted(round: AgentRound | null) {
   return round?.status === 'error' && round.error === AGENT_STOPPED_MESSAGE
@@ -281,14 +278,6 @@ function getConversationSearchText(conversation: AgentConversation) {
 function getRoundTasks(round: AgentRound | null, tasks: TaskRecord[]) {
   if (!round) return []
   return round.outputTaskIds.map((taskId) => tasks.find((task) => task.id === taskId) ?? null)
-}
-
-function getRoundTaskSlots(round: AgentRound | null, tasks: TaskRecord[]): AgentRoundTaskSlot[] {
-  if (!round) return []
-  return round.outputTaskIds.map((taskId) => ({
-    taskId,
-    task: tasks.find((task) => task.id === taskId) ?? null,
-  }))
 }
 
 const MOBILE_HEADER_PULL_THRESHOLD = 24
@@ -1015,7 +1004,7 @@ export default function AgentWorkspace() {
                 const siblingRounds = !isAssistant && round ? getAgentSiblingRounds(conversation, round) : []
                 const siblingIndex = round ? siblingRounds.findIndex((item) => item.id === round.id) : -1
                 const hasBranches = siblingRounds.length > 1
-                const taskSlotsForRound = isAssistant ? getRoundTaskSlots(round ?? null, tasks) : []
+                const taskSlotsForRound = isAssistant ? getVisibleAgentRoundTaskSlots(round ?? null, tasks) : []
                 const tasksForRound = taskSlotsForRound.map((slot) => slot.task).filter(Boolean) as TaskRecord[]
                 const favoriteTasksForRound = tasksForRound.filter((task) => (task.outputImages?.length ?? 0) > 0)
                 const hasRoundFavoriteTasks = favoriteTasksForRound.length > 0
@@ -1123,6 +1112,7 @@ export default function AgentWorkspace() {
                                 <div key={block.key} className="mt-4 max-w-sm" onClick={e => e.stopPropagation()}>
                                   <TaskCard
                                     task={block.task}
+                                    description={getTaskImageDescription(block.task, [conversation])}
                                     disableSwipe={true}
                                     onClick={() => setDetailTaskId(block.task.id)}
                                     onReuse={() => handleReuse(block.task)}

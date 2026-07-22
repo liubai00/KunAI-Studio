@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useStore, getCachedImage, ensureImageCached, reuseConfig, editOutputs, removeTask, showCodexCliPrompt, getCodexCliPromptKey, retryTask } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { useModalFocus } from '../hooks/useModalFocus'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { useTooltip } from '../hooks/useTooltip'
 import { formatImageRatio } from '../lib/size'
@@ -11,7 +12,9 @@ import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { downloadImageEntriesAsZip, downloadImageIds, getImageZipEntries } from '../lib/downloadImages'
 import { isAgentTaskPromptPending } from '../lib/taskPromptDisplay'
 import { replaceImageMentionsForApi } from '../lib/promptImageMentions'
+import { getTaskImageDescription } from '../lib/taskDescription'
 import { CloseIcon, CodeIcon, CopyIcon, DownloadIcon, EditIcon, LinkIcon, TrashIcon } from './icons'
+import GlobalModal from './GlobalModal'
 
 import ViewportTooltip from './ViewportTooltip'
 
@@ -24,6 +27,7 @@ export default function DetailModal() {
   const showToast = useStore((s) => s.showToast)
   const openFavoritePicker = useStore((s) => s.openFavoritePicker)
   const settings = useStore((s) => s.settings)
+  const agentConversations = useStore((s) => s.agentConversations)
   const dismissedCodexCliPrompts = useStore((s) => s.dismissedCodexCliPrompts)
   const streamPreviewSrc = useStore((s) => detailTaskId ? s.streamPreviews[detailTaskId] || '' : '')
   const streamPreviewSlots = useStore((s) => detailTaskId ? s.streamPreviewSlots[detailTaskId] : undefined)
@@ -41,9 +45,6 @@ export default function DetailModal() {
   const modalRef = useRef<HTMLDivElement>(null)
   const rawUrlsModalRef = useRef<HTMLDivElement>(null)
   const rawResponseModalRef = useRef<HTMLDivElement>(null)
-
-  const rawUrlsBackdropPointerDownRef = useRef(false)
-  const rawResponseBackdropPointerDownRef = useRef(false)
 
   const copyErrorTooltip = useTooltip()
   const copyRawUrlsTooltip = useTooltip()
@@ -96,7 +97,13 @@ export default function DetailModal() {
     if (count > 0 && imageIndex >= count) setImageIndex(count - 1)
   }, [imageIndex, streamPreviewItems.length, task, task?.status])
 
-  useCloseOnEscape(Boolean(task), () => setDetailTaskId(null))
+  const hasNestedDialog = showRawUrlsModal || showRawResponseModal
+  useCloseOnEscape(Boolean(task) && !hasNestedDialog, () => setDetailTaskId(null))
+  useModalFocus(Boolean(task) && !hasNestedDialog, modalRef)
+  useCloseOnEscape(showRawUrlsModal, () => setShowRawUrlsModal(false))
+  useModalFocus(showRawUrlsModal, rawUrlsModalRef)
+  useCloseOnEscape(showRawResponseModal, () => setShowRawResponseModal(false))
+  useModalFocus(showRawResponseModal, rawResponseModalRef)
   usePreventBackgroundScroll(Boolean(task), [modalRef, rawUrlsModalRef, rawResponseModalRef])
 
   // Reset index when task changes
@@ -230,6 +237,7 @@ export default function DetailModal() {
   if (!task) return null
 
   const isAgentTask = task.sourceMode === 'agent' || Boolean(task.agentConversationId || task.agentRoundId)
+  const imageDescription = getTaskImageDescription(task, agentConversations)
   const showPendingPrompt = isAgentTaskPromptPending(task)
   const isAgentEditTool = task.status === 'done' && String(task.agentToolAction ?? '').toLowerCase() === 'edit'
   const showReferenceSection = allInputImageIds.length > 0 || isAgentEditTool
@@ -267,7 +275,7 @@ export default function DetailModal() {
   const currentStreamPreviewSrc = activeStreamPreviewSrc
   const streamPartialImageIds = task.streamPartialImageIds ?? []
   const isPngOutput = task.params.output_format === 'png'
-  const transparentOutputText = task.transparentOutput || task.params.transparent_output ? 'true' : 'false'
+  const transparentOutputText = task.transparentOutput || task.params.transparent_output ? '开启' : '关闭'
   const currentTransparentOutputFailed = Boolean(currentOutputImageId && task.transparentOutput && task.transparentOriginalImages?.[currentOutputImageIndex] === '')
   const outputCompressionText = task.params.output_compression == null ? '未设置' : String(task.params.output_compression)
 
@@ -330,6 +338,15 @@ export default function DetailModal() {
       showToast('提示词已复制', 'success')
     } catch (err) {
       showToast(getClipboardFailureMessage('复制提示词失败', err), 'error')
+    }
+  }
+
+  const handleCopyDescription = async () => {
+    try {
+      await copyTextToClipboard(imageDescription)
+      showToast('图片介绍已复制', 'success')
+    } catch (err) {
+      showToast(getClipboardFailureMessage('复制图片介绍失败', err), 'error')
     }
   }
 
@@ -436,16 +453,14 @@ export default function DetailModal() {
   }
 
   return (
-    <div
-      data-no-drag-select
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      onClick={() => setDetailTaskId(null)}
-    >
-      <div className="absolute inset-0 bg-[rgba(12,11,9,0.55)] backdrop-blur-sm animate-overlay-in" />
+    <GlobalModal onClose={() => setDetailTaskId(null)} className="p-4">
       <div
         ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="图片详情"
+        tabIndex={-1}
         className="relative bg-surface border border-line2 rounded-[22px] shadow-lift max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row z-10 animate-modal-in"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex h-14 items-center justify-end px-4 md:hidden">
           <button
@@ -847,30 +862,16 @@ export default function DetailModal() {
           <div data-selectable-text className="flex-1">
             <div className="flex items-center gap-1.5 mb-2">
               <h3 className="text-xs font-semibold text-ink-3 tracking-[0.03em]">
-                输入内容
+                图片介绍
               </h3>
-              {task.prompt && !showPendingPrompt && (
+              {!showPendingPrompt && (
                 <button
-                  onClick={handleCopyPrompt}
+                  onClick={handleCopyDescription}
                   className="p-1 rounded-[7px] text-ink-3 hover:bg-surface2 hover:text-ink transition-colors"
-                  title="复制提示词"
+                  title="复制图片介绍"
                 >
                   <CopyIcon className="h-4 w-4" />
                 </button>
-              )}
-              {showPromptWarning && (
-                <span className="relative inline-flex">
-                  <button
-                    type="button"
-                    className="p-1 rounded-[7px] text-accent-ink hover:bg-accent-soft transition-colors"
-                    onClick={handleShowPromptWarning}
-                    aria-label="提示词已被改写"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                    </svg>
-                  </button>
-                </span>
               )}
             </div>
             {showPendingPrompt ? (
@@ -880,16 +881,32 @@ export default function DetailModal() {
               </div>
             ) : (
               <p className="text-[15px] text-ink leading-relaxed whitespace-pre-wrap mb-[22px]">
-                {task.prompt || '(无提示词)'}
+                {imageDescription}
               </p>
             )}
-            {showRevisedPrompt && currentRevisedPrompt && (
-              <div className="mb-4">
-                <ActualValueBadge
-                  value={currentRevisedPrompt}
-                  className="max-w-full rounded px-2 py-1 text-left text-xs leading-relaxed whitespace-pre-wrap"
-                />
-              </div>
+            {!showPendingPrompt && task.prompt && (
+              <details className="mb-5 rounded-xl border border-line bg-surface2 px-3.5 py-3 text-xs text-ink-2">
+                <summary className="cursor-pointer select-none font-medium text-ink-2">查看原始提示词</summary>
+                <div className="mt-3 flex items-start gap-2 border-t border-line pt-3">
+                  <p className="min-w-0 flex-1 whitespace-pre-wrap break-words leading-relaxed">{task.prompt}</p>
+                  <button type="button" onClick={handleCopyPrompt} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-ink-3 transition hover:bg-surface hover:text-ink" aria-label="复制原始提示词">
+                    <CopyIcon className="h-4 w-4" />
+                  </button>
+                </div>
+                {showRevisedPrompt && currentRevisedPrompt && (
+                  <div className="mt-3 border-t border-line pt-3">
+                    <div className="mb-1.5 flex items-center gap-1.5 font-medium text-ink-3">
+                      API 实际提示词
+                      {showPromptWarning && (
+                        <button type="button" className="rounded p-1 text-accent-ink hover:bg-accent-soft" onClick={handleShowPromptWarning} aria-label="提示词已被改写">
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /></svg>
+                        </button>
+                      )}
+                    </div>
+                    <ActualValueBadge value={currentRevisedPrompt} className="max-w-full rounded px-2 py-1 text-left text-xs leading-relaxed whitespace-pre-wrap" />
+                  </div>
+                )}
+              </details>
             )}
 
             {/* 参考图 */}
@@ -1081,20 +1098,10 @@ export default function DetailModal() {
       </div>
 
       {showRawUrlsModal && rawImageUrls.length > 0 && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(12,11,9,0.55)] p-4 backdrop-blur-sm sm:p-6"
-          onPointerDown={(e) => {
-            rawUrlsBackdropPointerDownRef.current = e.target === e.currentTarget
-          }}
-          onClick={(e) => {
-            e.stopPropagation()
-            if (rawUrlsBackdropPointerDownRef.current && e.target === e.currentTarget) setShowRawUrlsModal(false)
-            rawUrlsBackdropPointerDownRef.current = false
-          }}
-        >
-          <div ref={rawUrlsModalRef} className="flex w-full max-w-2xl max-h-[90vh] flex-col overflow-hidden rounded-2xl bg-surface border border-line2 shadow-lift" onClick={(e) => e.stopPropagation()}>
+        <GlobalModal layer="dialog" onClose={() => setShowRawUrlsModal(false)} className="p-4 sm:p-6">
+          <div ref={rawUrlsModalRef} role="dialog" aria-modal="true" aria-labelledby="raw-image-urls-title" tabIndex={-1} className="relative z-10 flex w-full max-w-2xl max-h-[90vh] flex-col overflow-hidden rounded-2xl bg-surface border border-line2 shadow-lift">
             <div className="flex items-center justify-between border-b border-line px-5 py-4 shrink-0">
-              <h3 className="text-base font-semibold text-ink">原始图片链接 ({rawImageUrls.length})</h3>
+              <h3 id="raw-image-urls-title" className="text-base font-semibold text-ink">原始图片链接 ({rawImageUrls.length})</h3>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -1153,31 +1160,24 @@ export default function DetailModal() {
               </div>
             </div>
           </div>
-        </div>
+        </GlobalModal>
       )}
 
       {showRawResponseModal && task?.rawResponsePayload && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(12,11,9,0.55)] p-4 backdrop-blur-sm sm:p-6"
-          onPointerDown={(e) => {
-            rawResponseBackdropPointerDownRef.current = e.target === e.currentTarget
-          }}
-          onClick={(e) => {
-            e.stopPropagation()
-            if (rawResponseBackdropPointerDownRef.current && e.target === e.currentTarget) setShowRawResponseModal(false)
-            rawResponseBackdropPointerDownRef.current = false
-          }}
-        >
+        <GlobalModal layer="dialog" onClose={() => setShowRawResponseModal(false)} className="p-4 sm:p-6">
           <div
             ref={rawResponseModalRef}
-            className="flex w-full max-w-3xl max-h-[90vh] flex-col overflow-hidden rounded-2xl bg-surface border border-line2 shadow-lift"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="raw-response-title"
+            tabIndex={-1}
+            className="relative z-10 flex w-full max-w-3xl max-h-[90vh] flex-col overflow-hidden rounded-2xl bg-surface border border-line2 shadow-lift"
             onPointerDown={(e) => {
               if (!(e.target as Element).closest('[data-selectable-text]')) clearTextSelection()
             }}
-            onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-line px-5 py-4 shrink-0">
-              <h3 className="text-base font-semibold text-ink">原始响应数据</h3>
+              <h3 id="raw-response-title" className="text-base font-semibold text-ink">原始响应数据</h3>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -1209,8 +1209,8 @@ export default function DetailModal() {
               </pre>
             </div>
           </div>
-        </div>
+        </GlobalModal>
       )}
-    </div>
+    </GlobalModal>
   )
 }

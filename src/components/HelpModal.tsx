@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { createPortal } from 'react-dom'
 import type { AppMode } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { useModalFocus } from '../hooks/useModalFocus'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
+import GlobalModal from './GlobalModal'
 
 interface HelpModalProps {
   appMode: AppMode
@@ -29,13 +29,8 @@ export default function HelpModal({ appMode, isFavoriteCollectionOverview = fals
   useModalFocus(true, modalRef)
   usePreventBackgroundScroll(true, modalRef)
 
-  return createPortal(
-    <div
-      data-no-drag-select
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div className="absolute inset-0 bg-[rgba(12,11,9,0.55)] backdrop-blur-sm animate-overlay-in" />
+  return (
+    <GlobalModal onClose={onClose} className="p-4">
       <div
         ref={modalRef}
         role="dialog"
@@ -43,7 +38,6 @@ export default function HelpModal({ appMode, isFavoriteCollectionOverview = fals
         aria-labelledby="help-modal-title"
         tabIndex={-1}
         className="relative z-10 w-full max-w-md rounded-[22px] border border-line2 bg-surface p-5 shadow-lift animate-modal-in flex flex-col max-h-[85vh] custom-scrollbar"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-center justify-between gap-4">
           <h3 id="help-modal-title" className="text-base font-display font-semibold text-ink flex items-center gap-2">
@@ -178,7 +172,6 @@ export default function HelpModal({ appMode, isFavoriteCollectionOverview = fals
           <span className="text-sm font-medium text-ink-3">KunAI Studio · AI 视觉创作工作台</span>
         </div>
       </div>
-    </div>,
-    document.body
+    </GlobalModal>
   )
 }

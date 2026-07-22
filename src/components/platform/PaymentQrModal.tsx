@@ -2,8 +2,12 @@ import { CheckCircle2, ExternalLink, LoaderCircle, RefreshCw, ScanLine, X } from
 import QRCode from 'qrcode'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
+import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
+import { useModalFocus } from '../../hooks/useModalFocus'
+import { usePreventBackgroundScroll } from '../../hooks/usePreventBackgroundScroll'
 import type { PlatformPaymentStatus, PlatformProductCheckout } from '../../lib/platformCheckout'
 import { recheckPlatformPayment } from '../../lib/platformCheckout'
+import GlobalModal from '../GlobalModal'
 
 interface PaymentQrModalProps {
   checkout: PlatformProductCheckout
@@ -66,7 +70,7 @@ export default function PaymentQrModal(props: PaymentQrModalProps) {
       }
       settledRef.current = true
       setState('paid')
-      setMessage(props.checkout.kind === 'credits' ? `支付成功，${props.checkout.credits} 次生图额度已到账` : `支付成功，¥${props.checkout.amount.toFixed(2)} 对话余额已到账`)
+      setMessage(props.checkout.kind === 'credits' ? `支付成功，${props.checkout.credits} 次生图额度已到账` : `支付成功，¥${props.checkout.amount.toFixed(2)} 账户余额已到账`)
       await props.onPaid(result)
     } catch (err) {
       if (manual) setMessage(err instanceof Error ? err.message : '暂时无法核对支付结果，请稍后重试')
@@ -96,40 +100,16 @@ export default function PaymentQrModal(props: PaymentQrModalProps) {
     }
   }, [checkPayment, props.checkout.expires_at, state])
 
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    dialogRef.current?.focus()
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { props.onClose(); return }
-      if (event.key !== 'Tab' || !dialogRef.current) return
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'))
-      if (!focusable.length) return
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      const focusOutside = !dialogRef.current.contains(document.activeElement)
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current || focusOutside)) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && (document.activeElement === last || focusOutside)) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      document.removeEventListener('keydown', handleKeyDown)
-      props.returnFocusRef?.current?.focus()
-    }
-  }, [props.onClose, props.returnFocusRef])
+  useCloseOnEscape(true, props.onClose)
+  useModalFocus(true, dialogRef, props.returnFocusRef)
+  usePreventBackgroundScroll(true, dialogRef)
 
   const expiresText = new Date(props.checkout.expires_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   const payLabel = props.checkout.pay_type === 'alipay' ? '支付宝扫码支付' : '微信扫码支付'
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-[rgba(5,8,24,0.78)] p-3 backdrop-blur-md animate-overlay-in" onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
-      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="payment-qr-title" tabIndex={-1} className="max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto rounded-[24px] border border-line2 bg-surface p-5 shadow-lift outline-none animate-modal-in sm:p-6">
+    <GlobalModal layer="dialog" onClose={props.onClose} className="p-3" backdropClassName="!bg-[rgba(5,8,24,0.78)] backdrop-blur-md">
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="payment-qr-title" tabIndex={-1} className="relative z-10 max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto rounded-[24px] border border-line2 bg-surface p-5 shadow-lift outline-none animate-modal-in sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-accent"><ScanLine className="h-4 w-4" />Secure payment</div>
@@ -166,6 +146,6 @@ export default function PaymentQrModal(props: PaymentQrModalProps) {
         </div>
         {props.checkout.checkout_url && <a href={props.checkout.checkout_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 text-sm text-ink-3 transition hover:text-ink">无法扫码？打开安全收银台<ExternalLink className="h-4 w-4" /></a>}
       </section>
-    </div>
+    </GlobalModal>
   )
 }

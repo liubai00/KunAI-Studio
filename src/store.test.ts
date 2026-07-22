@@ -2133,6 +2133,7 @@ describe('agent context for removed outputs', () => {
           prompt: '画两张图',
           inputImageIds: [],
           outputTaskIds: ['task-deleted', 'task-live'],
+          removedOutputTaskIds: ['task-deleted'],
           responseOutput: [
             { type: 'message', content: [{ type: 'output_text', text: '已生成两张图。' }] },
             { type: 'image_generation_call', id: 'deleted-call', result: 'deleted-base64' },
@@ -2542,6 +2543,43 @@ describe('agent context for removed outputs', () => {
     expect(remainingTaskPayload).not.toContain('deleted-base64')
     expect(serializedConversations).toContain('live-base64')
     expect(remainingTaskPayload).toContain('live-base64')
+    expect(state.agentConversations[0].rounds.find((round) => round.id === 'round-a')).toMatchObject({
+      outputTaskIds: ['task-deleted', 'task-live'],
+      removedOutputTaskIds: ['task-deleted'],
+    })
+  })
+
+  it('drops failed Agent task references instead of creating removed image placeholders', async () => {
+    const failedTask = task({
+      id: 'task-failed-retry',
+      outputImages: [],
+      status: 'error',
+      error: '内部重试失败',
+      sourceMode: 'agent',
+      agentRoundId: 'round-a',
+      agentToolCallId: 'failed-retry-call',
+    })
+    useStore.setState((state) => ({
+      tasks: [failedTask, ...state.tasks],
+      agentConversations: state.agentConversations.map((conversation) => ({
+        ...conversation,
+        rounds: conversation.rounds.map((round) => round.id === 'round-a'
+          ? { ...round, outputTaskIds: ['task-failed-retry', 'task-live'], removedOutputTaskIds: undefined }
+          : round),
+        messages: conversation.messages.map((message) => message.roundId === 'round-a' && message.role === 'assistant'
+          ? { ...message, outputTaskIds: ['task-failed-retry', 'task-live'] }
+          : message),
+      })),
+    }))
+
+    await removeTask(failedTask, { silent: true })
+
+    const conversation = useStore.getState().agentConversations[0]
+    expect(conversation.rounds.find((round) => round.id === 'round-a')).toMatchObject({
+      outputTaskIds: ['task-live'],
+    })
+    expect(conversation.rounds.find((round) => round.id === 'round-a')?.removedOutputTaskIds).toBeUndefined()
+    expect(conversation.messages.find((message) => message.roundId === 'round-a' && message.role === 'assistant')?.outputTaskIds).toEqual(['task-live'])
   })
 
   it('does not corrupt batch task payloads when deleting one of the batch tasks', async () => {
@@ -2786,6 +2824,41 @@ describe('agent built-in image tool failure', () => {
       content: '图片失败，但回复继续。',
       outputTaskIds: [failedTask.id],
     })
+  })
+
+  it('deduplicates the same image from streaming completion and the final response', async () => {
+    vi.mocked(callAgentResponsesApi).mockImplementationOnce(async (opts) => {
+      const image = {
+        toolCallId: 'ig-success',
+        dataUrl: 'data:image/png;base64,c3RyZWFtZWQtc3VjY2Vzcy0xMDI0eDEwMjQ=',
+        revisedPrompt: 'cinematic workspace',
+        actualParams: { size: '1024x1024' },
+      }
+      await opts.onImageToolStarted?.({ toolCallId: image.toolCallId })
+      await opts.onImageToolCompleted?.(image)
+      opts.onTextDelta?.('已生成一张赛博朋克工作区图片。')
+      return {
+        text: '已生成一张赛博朋克工作区图片。',
+        images: [image, image],
+        outputItems: [{ type: 'message', content: [{ type: 'output_text', text: '已生成一张赛博朋克工作区图片。' }] }],
+        responseId: 'response-image-success',
+      }
+    })
+
+    await submitAgentMessage()
+    for (let i = 0; i < 10 && useStore.getState().agentConversations[0].rounds[0]?.status !== 'done'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    const state = useStore.getState()
+    expect(state.tasks).toHaveLength(1)
+    expect(state.tasks[0]).toMatchObject({
+      status: 'done',
+      agentToolCallId: 'ig-success',
+      displayDescription: '已生成一张赛博朋克工作区图片。',
+      outputImages: [expect.any(String)],
+    })
+    expect(state.agentConversations[0].rounds[0].outputTaskIds).toEqual([state.tasks[0].id])
   })
 
   it('shows a localized Agent message for network failures', async () => {
@@ -3096,6 +3169,7 @@ describe('agent batch reference resolution', () => {
 
     const batchTask = useStore.getState().tasks.find((item) => item.agentBatchCallId === 'batch-call-with-raw')
     expect(batchTask).toMatchObject({ status: 'done', rawResponsePayload: 'batch-image-raw-response' })
+    expect(useStore.getState().tasks.filter((item) => item.agentBatchCallId === 'batch-call-with-raw')).toHaveLength(1)
   })
 })
 

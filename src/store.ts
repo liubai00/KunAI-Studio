@@ -44,6 +44,7 @@ import {
 import { callImageApi } from './lib/api'
 import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, callPlatformSearchWeb, finishPlatformAgentRound, isPlatformAgentCallFailedError, isPlatformUserContextChangedError, parseBatchImageCallArguments, type AgentApiResultImage, type PlatformSearchWebInput } from './lib/agentApi'
 import { collectAgentRoundOutputImageSlots, extractAgentReferenceIds, getAgentCurrentReferenceId, getAgentGeneratedImageReferenceId, replaceAgentPromptImageReferencesForApi } from './lib/agentImageReferences'
+import { getFinalAgentResponseTaskIds, normalizeAgentConversationTaskReferences } from './lib/agentTaskReferences'
 import { showBrowserNotification } from './lib/browserNotification'
 import { IMAGE_FETCH_CORS_HINT } from './lib/imageApiShared'
 import { getFalErrorMessage, getFalQueuedImageResult } from './lib/falAiImageApi'
@@ -58,6 +59,7 @@ import { buildExportZip, readExportZip, readExportZipFileAsDataUrl } from './lib
 import { createUserScopedStorage } from './lib/userStorage'
 import { createPlatformSettings, isPlatformModeEnabled, PLATFORM_IMAGE_PROFILE_ID } from './lib/platformMode'
 import { getPlatformGenerationPriceMicros } from './lib/platformCurrency'
+import { getChineseImageDescription, getTaskImageDescription } from './lib/taskDescription'
 import { usePlatformStore } from './platformStore'
 
 export const ALL_FAVORITES_COLLECTION_ID = '__all_favorites__'
@@ -443,7 +445,10 @@ function normalizeAgentRound(value: unknown, fallbackIndex: number): AgentRound 
     inputImageIds: normalizeStringArray(round.inputImageIds),
     maskTargetImageId: typeof round.maskTargetImageId === 'string' ? round.maskTargetImageId : null,
     maskImageId: typeof round.maskImageId === 'string' ? round.maskImageId : null,
-    outputTaskIds: normalizeStringArray(round.outputTaskIds),
+    outputTaskIds: Array.from(new Set(normalizeStringArray(round.outputTaskIds))),
+    ...(Array.isArray(round.removedOutputTaskIds)
+      ? { removedOutputTaskIds: Array.from(new Set(normalizeStringArray(round.removedOutputTaskIds))) }
+      : {}),
     ...(typeof round.responseId === 'string' ? { responseId: round.responseId } : {}),
     ...(Array.isArray(round.responseOutput) ? { responseOutput: round.responseOutput } : {}),
     ...(Number.isSafeInteger(round.responseOutputPendingFrom) && Number(round.responseOutputPendingFrom) >= 0
@@ -476,7 +481,7 @@ function normalizeAgentMessage(value: unknown): AgentMessage | null {
     ...(Array.isArray(message.inputImageIds) ? { inputImageIds: normalizeStringArray(message.inputImageIds) } : {}),
     maskTargetImageId: typeof message.maskTargetImageId === 'string' ? message.maskTargetImageId : null,
     maskImageId: typeof message.maskImageId === 'string' ? message.maskImageId : null,
-    ...(Array.isArray(message.outputTaskIds) ? { outputTaskIds: normalizeStringArray(message.outputTaskIds) } : {}),
+    ...(Array.isArray(message.outputTaskIds) ? { outputTaskIds: Array.from(new Set(normalizeStringArray(message.outputTaskIds))) } : {}),
     createdAt: typeof message.createdAt === 'number' ? message.createdAt : Date.now(),
   }
 }
@@ -2265,7 +2270,18 @@ export async function initStore() {
   const interruptedTaskIds = new Set(interruptedTasks.map((task) => task.id))
   const favoriteState = useStore.getState()
   const normalizedFavorites = normalizeLoadedFavoriteState(markedTasks.map(getPersistableTask), favoriteState.favoriteCollections, favoriteState.defaultFavoriteCollectionId)
-  const tasks = normalizedFavorites.tasks
+  const descriptionChangedTaskIds = new Set<string>()
+  const tasks = normalizedFavorites.tasks.map((task) => {
+    if (task.status !== 'done' || task.outputImages.length === 0 || task.displayDescription) return task
+    descriptionChangedTaskIds.add(task.id)
+    return { ...task, displayDescription: getTaskImageDescription(task, loadedAgentConversations) }
+  })
+  const normalizedTaskReferences = normalizeAgentConversationTaskReferences(loadedAgentConversations, tasks)
+  if (normalizedTaskReferences.changed) {
+    loadedAgentConversations = normalizedTaskReferences.conversations
+    useStore.setState({ agentConversations: loadedAgentConversations })
+    await replaceStoredAgentConversations(loadedAgentConversations)
+  }
   if (normalizedFavorites.collections !== favoriteState.favoriteCollections) {
     favoriteState.setFavoriteCollections(normalizedFavorites.collections)
   }
@@ -2273,7 +2289,7 @@ export async function initStore() {
     useStore.getState().setDefaultFavoriteCollectionId(normalizedFavorites.defaultFavoriteCollectionId)
   }
   await Promise.all(tasks
-    .filter((task, index) => normalizedFavorites.changed || interruptedTaskIds.has(task.id) || task.rawResponsePayload !== markedTasks[index]?.rawResponsePayload)
+    .filter((task, index) => normalizedFavorites.changed || descriptionChangedTaskIds.has(task.id) || interruptedTaskIds.has(task.id) || task.rawResponsePayload !== markedTasks[index]?.rawResponsePayload)
     .map((task) => putTask(task)))
   useStore.getState().setTasks(tasks)
   showSupportPromptForExistingLocalData(tasks)
@@ -3156,10 +3172,12 @@ async function createAgentContextImageContent(slots: AgentContextImageSlot[], bu
 
 async function createAgentGeneratedImagesInputItem(round: AgentRound, tasks: TaskRecord[], budget?: AgentContextImageBudget) {
   const slots: AgentContextImageSlot[] = []
+  const removedTaskIds = new Set(round.removedOutputTaskIds ?? [])
   let imageIndex = 0
   for (const taskId of round.outputTaskIds) {
     const task = tasks.find((item) => item.id === taskId)
     if (!task) {
+      if (!removedTaskIds.has(taskId)) continue
       const removedRefText = `<removed_ref id="${getAgentGeneratedImageReferenceId(round, imageIndex)}" />`
       slots.push({ refText: removedRefText, omittedRefText: removedRefText })
       imageIndex += 1
@@ -3280,6 +3298,12 @@ function scrubResponseOutputForDeletedAgentTasks(round: AgentRound, output: Resp
 
   let anonymousImageIndex = 0
   return output.filter((item) => {
+    if (item.type === 'function_call' && item.name === 'generate_image' && item.call_id) {
+      return !deletedToolCallIds.has(item.call_id)
+    }
+    if (item.type === 'function_call_output' && item.call_id) {
+      return !deletedToolCallIds.has(item.call_id)
+    }
     if (item.type !== 'image_generation_call') return true
 
     if (typeof item.id === 'string' && item.id) {
@@ -3294,18 +3318,34 @@ function scrubResponseOutputForDeletedAgentTasks(round: AgentRound, output: Resp
 
 function scrubAgentConversationsForDeletedTasks(conversations: AgentConversation[], deletedTasks: TaskRecord[]) {
   if (deletedTasks.length === 0) return conversations
+  const deletedById = new Map(deletedTasks.map((task) => [task.id, task]))
 
-  return conversations.map((conversation) => ({
-    ...conversation,
-    rounds: conversation.rounds.map((round) => {
-      const roundDeletedTasks = deletedTasks.filter((task) => round.outputTaskIds.includes(task.id))
-      if (roundDeletedTasks.length === 0 || !round.responseOutput?.length) return round
+  return conversations.map((conversation) => {
+    const rounds = conversation.rounds.map((round) => {
+      const roundDeletedTasks = round.outputTaskIds.map((taskId) => deletedById.get(taskId)).filter((task): task is TaskRecord => Boolean(task))
+      if (roundDeletedTasks.length === 0) return round
+      const successfulDeletedTaskIds = new Set(roundDeletedTasks.filter((task) => task.outputImages.length > 0).map((task) => task.id))
+      const failedDeletedTaskIds = new Set(roundDeletedTasks.filter((task) => task.outputImages.length === 0).map((task) => task.id))
+      const outputTaskIds = uniqueIds(round.outputTaskIds).filter((taskId) => !failedDeletedTaskIds.has(taskId))
+      const removedOutputTaskIds = uniqueIds([
+        ...(round.removedOutputTaskIds ?? []),
+        ...successfulDeletedTaskIds,
+      ]).filter((taskId) => outputTaskIds.includes(taskId))
       return {
         ...round,
-        responseOutput: scrubResponseOutputForDeletedAgentTasks(round, round.responseOutput, roundDeletedTasks),
+        outputTaskIds,
+        ...(removedOutputTaskIds.length > 0 ? { removedOutputTaskIds } : { removedOutputTaskIds: undefined }),
+        ...(round.responseOutput?.length
+          ? { responseOutput: scrubResponseOutputForDeletedAgentTasks(round, round.responseOutput, roundDeletedTasks) }
+          : {}),
       }
-    }),
-  }))
+    })
+    const roundTaskIds = new Map(rounds.map((round) => [round.id, new Set(round.outputTaskIds)]))
+    const messages = conversation.messages.map((message) => message.outputTaskIds
+      ? { ...message, outputTaskIds: uniqueIds(message.outputTaskIds).filter((taskId) => roundTaskIds.get(message.roundId)?.has(taskId)) }
+      : message)
+    return { ...conversation, rounds, messages }
+  })
 }
 
 function scrubTaskRawResponsePayloadForDeletedTasks(task: TaskRecord, conversations: AgentConversation[], deletedTasks: TaskRecord[]) {
@@ -3316,7 +3356,7 @@ function scrubTaskRawResponsePayloadForDeletedTasks(task: TaskRecord, conversati
     .find((item) => item.id === task.agentRoundId)
   if (!round) return task
 
-  const roundDeletedTasks = deletedTasks.filter((item) => round.outputTaskIds.includes(item.id))
+  const roundDeletedTasks = deletedTasks.filter((item) => item.agentRoundId === round.id)
   if (roundDeletedTasks.length === 0) return task
 
   try {
@@ -3373,7 +3413,11 @@ function sanitizeResponseOutputForInput(output: ResponsesOutputItem[], options: 
 function mergeResponseOutputItems(previous: ResponsesOutputItem[], next: ResponsesOutputItem[]) {
   const merged = [...previous]
   for (const item of next) {
-    const index = item.id ? merged.findIndex((existing) => existing.id === item.id) : -1
+    const index = item.id
+      ? merged.findIndex((existing) => existing.id === item.id)
+      : item.call_id && (item.type === 'function_call' || item.type === 'function_call_output')
+      ? merged.findIndex((existing) => existing.type === item.type && existing.call_id === item.call_id)
+      : -1
     if (index >= 0) merged[index] = item
     else merged.push(item)
   }
@@ -4289,8 +4333,9 @@ async function executeAgentRound(
     const resumedAssistantContent = resume ? recoveredResponseText || existingAssistantMessage?.content.trim() || '' : ''
     const shouldStreamAssistantMessage = activeProfile.streamImages === true
     const imageRequestSettings = createSettingsForApiProfile(requestSettings, imageProfile)
-    const streamingTaskIds: string[] = resume ? [...round.outputTaskIds] : []
+    const streamingTaskIds: string[] = resume ? getAgentRoundTaskIds(round, latestState.tasks) : []
     const taskIdByToolCallId = new Map<string, string>()
+    const taskIdByImageDataUrl = new Map<string, string>()
 
     const attachTaskToAgentRound = (taskId: string) => {
       if (streamingTaskIds.includes(taskId)) return
@@ -4320,7 +4365,9 @@ async function executeAgentRound(
       const existingTaskId = taskIdByToolCallId.get(toolCallId)
       if (existingTaskId) return existingTaskId
 
-      const existingTask = useStore.getState().tasks.find((task) => task.agentToolCallId === toolCallId)
+      const existingTask = useStore.getState().tasks.find((task) =>
+        task.agentToolCallId === toolCallId && task.agentConversationId === conversationId && task.agentRoundId === roundId,
+      )
       if (existingTask) {
         taskIdByToolCallId.set(toolCallId, existingTask.id)
         attachTaskToAgentRound(existingTask.id)
@@ -4361,8 +4408,29 @@ async function executeAgentRound(
     }
 
     const completeAgentImageTask = async (image: AgentApiResultImage, rawResponsePayload?: string) => {
+      const duplicateTaskId = taskIdByImageDataUrl.get(image.dataUrl)
+      if (duplicateTaskId) {
+        if (image.toolCallId) taskIdByToolCallId.set(image.toolCallId, duplicateTaskId)
+        const duplicateTask = useStore.getState().tasks.find((task) => task.id === duplicateTaskId)
+        if (rawResponsePayload && duplicateTask && !duplicateTask.rawResponsePayload) {
+          await updateTaskInStore(duplicateTaskId, { rawResponsePayload })
+        }
+        return duplicateTaskId
+      }
       const toolCallId = image.toolCallId ?? genId()
       const taskId = await ensureStreamingAgentTask(toolCallId)
+      const claimedTaskId = taskIdByImageDataUrl.get(image.dataUrl)
+      if (claimedTaskId && claimedTaskId !== taskId) {
+        taskIdByToolCallId.set(toolCallId, claimedTaskId)
+        const duplicateTask = useStore.getState().tasks.find((task) => task.id === taskId)
+        if (duplicateTask) await removeTask(duplicateTask, { silent: true })
+        const claimedTask = useStore.getState().tasks.find((task) => task.id === claimedTaskId)
+        if (rawResponsePayload && claimedTask && !claimedTask.rawResponsePayload) {
+          await updateTaskInStore(claimedTaskId, { rawResponsePayload })
+        }
+        return claimedTaskId
+      }
+      taskIdByImageDataUrl.set(image.dataUrl, taskId)
       const latestTask = useStore.getState().tasks.find((task) => task.id === taskId)
       if (latestTask?.status === 'done' && latestTask.outputImages.length > 0) {
         if (rawResponsePayload && !latestTask.rawResponsePayload) {
@@ -4379,7 +4447,10 @@ async function executeAgentRound(
         n: 1,
       }
       updateTaskInStore(taskId, {
-        prompt: image.revisedPrompt ?? latestTask?.prompt ?? '',
+        prompt: latestTask?.prompt || image.revisedPrompt || '',
+        displayDescription: latestTask?.displayDescription
+          || getChineseImageDescription(latestTask?.prompt || image.revisedPrompt || '')
+          || '这是一张由 KunAI Studio 根据原始提示词生成的图片。',
         outputImages: [stored.id],
         actualParams,
         actualParamsByImage: { [stored.id]: actualParams },
@@ -5160,8 +5231,9 @@ async function executeAgentRound(
       const newTextInThisResponse = accumulatedText.slice(textBeforeResponse.length).trim()
       if (newTextInThisResponse) textSegments.push(newTextInThisResponse)
 
-      // Process built-in image_generation_call results (single images)
-      for (const image of result.images) {
+      // 流式完成事件和最终响应可能包含同一结果，按工具调用或图片内容去重。
+      const uniqueResponseImages = Array.from(new Map(result.images.map((image) => [image.toolCallId || image.dataUrl, image])).values())
+      for (const image of uniqueResponseImages) {
         if (image.toolCallId && taskIdByToolCallId.has(image.toolCallId)) {
           const completedTaskId = await completeAgentImageTask(image, result.rawResponsePayload)
           currentResponseTaskIds.add(completedTaskId)
@@ -5191,7 +5263,8 @@ async function executeAgentRound(
         }
         const task: TaskRecord = {
           id: genId(),
-          prompt: image.revisedPrompt ?? round?.prompt ?? userMessage.content,
+          prompt: round?.prompt ?? userMessage.content,
+          displayDescription: getChineseImageDescription(round?.prompt ?? userMessage.content) || '这是一张由 KunAI Studio 根据原始提示词生成的图片。',
           params,
           apiProvider: imageProfile.provider,
           apiProfileId: imageProfile.id,
@@ -5358,7 +5431,13 @@ async function executeAgentRound(
       (task) => Boolean(task.agentToolCallId && !task.agentBatchCallId),
     )
 
-    const taskIds: string[] = [...streamingTaskIds]
+    const allResponseTaskIds = [...streamingTaskIds]
+    const taskIds = getFinalAgentResponseTaskIds(allResponseTaskIds, useStore.getState().tasks)
+    const visibleTaskIdSet = new Set(taskIds)
+    const supersededTasks = useStore.getState().tasks.filter((task) =>
+      allResponseTaskIds.includes(task.id) && !visibleTaskIdSet.has(task.id),
+    )
+    for (const task of supersededTasks) await removeTask(task, { silent: true })
     const outputIds = taskIds.flatMap((taskId) => useStore.getState().tasks.find((task) => task.id === taskId)?.outputImages ?? [])
     const limitNotice = reachedToolLimit ? `已达到最大工具调用次数（${maxToolCalls}），已停止自动续跑。` : ''
     const joinedText = textSegments.join('\n\n').trim()
@@ -5366,6 +5445,14 @@ async function executeAgentRound(
       .filter(Boolean)
       .join(joinedText ? '\n\n' : '')
       || (taskIds.length > 0 || outputIds.length > 0 ? '图像已生成。' : '')
+    const displayDescription = getChineseImageDescription(finalContent)
+    if (displayDescription) {
+      await Promise.all(taskIds.map((taskId) => {
+        const task = useStore.getState().tasks.find((item) => item.id === taskId)
+        if (!task || task.status !== 'done' || task.outputImages.length === 0) return undefined
+        return updateTaskInStore(taskId, { displayDescription })
+      }))
+    }
 
     const assistantMessage: AgentMessage = {
       id: assistantMessageId,
@@ -5615,6 +5702,7 @@ async function executeTask(taskId: string) {
     useStore.getState().setTaskStreamPreview(taskId)
     updateTaskInStore(taskId, {
       outputImages: outputIds,
+      displayDescription: latestBeforeUpdate.displayDescription || getTaskImageDescription(latestBeforeUpdate),
       transparentOriginalImages: transparentOriginalImageIds,
       outputErrors: result.failedRequests?.length ? result.failedRequests : undefined,
       streamPartialImageIds: undefined,
@@ -6111,7 +6199,7 @@ export async function clearFailedTasks(taskIds?: string[]) {
 }
 
 /** 删除单条任务 */
-export async function removeTask(task: TaskRecord) {
+export async function removeTask(task: TaskRecord, options: { silent?: boolean } = {}) {
   const { tasks, setTasks, inputImages, galleryInputDraft, showToast } = useStore.getState()
 
   // 收集此任务关联的图片
@@ -6146,7 +6234,7 @@ export async function removeTask(task: TaskRecord) {
     }
   }
 
-  showToast('任务已删除', 'success')
+  if (!options.silent) showToast('任务已删除', 'success')
 }
 
 /** 清空数据选项 */

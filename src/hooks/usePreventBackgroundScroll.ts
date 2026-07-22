@@ -5,6 +5,7 @@ type ScrollDelta = { x: number; y: number }
 
 let lockCount = 0
 let previousBodyOverflow = ''
+let previousDocumentOverflow = ''
 let previousBodyOverscrollBehavior = ''
 let previousDocumentOverscrollBehavior = ''
 
@@ -66,9 +67,11 @@ export function usePreventBackgroundScroll(active: boolean, allowRefs?: ScrollBo
 
     if (lockCount === 0) {
       previousBodyOverflow = document.body.style.overflow
+      previousDocumentOverflow = document.documentElement.style.overflow
       previousBodyOverscrollBehavior = document.body.style.overscrollBehavior
       previousDocumentOverscrollBehavior = document.documentElement.style.overscrollBehavior
       document.body.style.overflow = 'hidden'
+      document.documentElement.style.overflow = 'hidden'
       document.body.style.overscrollBehavior = 'none'
       document.documentElement.style.overscrollBehavior = 'none'
     }
@@ -118,6 +121,7 @@ export function usePreventBackgroundScroll(active: boolean, allowRefs?: ScrollBo
       lockCount = Math.max(0, lockCount - 1)
       if (lockCount === 0) {
         document.body.style.overflow = previousBodyOverflow
+        document.documentElement.style.overflow = previousDocumentOverflow
         document.body.style.overscrollBehavior = previousBodyOverscrollBehavior
         document.documentElement.style.overscrollBehavior = previousDocumentOverscrollBehavior
       }

@@ -10,6 +10,7 @@ import ViewportTooltip from './ViewportTooltip'
 
 interface Props {
   task: TaskRecord
+  description?: string
   onReuse: () => void
   onEditOutputs: () => void
   onDelete: () => void
@@ -59,6 +60,7 @@ function TaskActionButton({
 
 export default function TaskCard({
   task,
+  description,
   onReuse,
   onEditOutputs,
   onDelete,
@@ -538,7 +540,7 @@ export default function TaskCard({
             </div>
           ) : (
             <p className="mb-2.5 min-h-[18px] text-[12.5px] leading-[1.45] text-ink line-clamp-2">
-              {task.prompt || '(无提示词)'}
+              {description || task.displayDescription || task.prompt || '(无提示词)'}
             </p>
           )}
           {/* 参数标签：横向滚动 */}

@@ -164,6 +164,8 @@ export type TaskStatus = 'running' | 'done' | 'error'
 export interface TaskRecord {
   id: string
   prompt: string
+  /** 面向用户展示的中文图片说明；原始 prompt 始终保留在 prompt 字段。 */
+  displayDescription?: string
   params: TaskParams
   /** 生成时使用的 Provider 类型 */
   apiProvider?: ApiProvider
@@ -276,6 +278,8 @@ export interface AgentRound {
   maskTargetImageId?: string | null
   maskImageId?: string | null
   outputTaskIds: string[]
+  /** 用户主动删除且原本包含有效输出的任务，用于保留明确的删除语义。 */
+  removedOutputTaskIds?: string[]
   responseId?: string
   responseOutput?: ResponsesOutputItem[]
   responseOutputPendingFrom?: number

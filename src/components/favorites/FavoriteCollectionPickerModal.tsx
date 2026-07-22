@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import type { FavoriteCollection } from '../../types'
 import {
   createFavoriteCollection,
@@ -10,11 +9,13 @@ import {
   useStore,
 } from '../../store'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
+import { useModalFocus } from '../../hooks/useModalFocus'
 import { usePreventBackgroundScroll } from '../../hooks/usePreventBackgroundScroll'
 import { Checkbox } from '../Checkbox'
 import { TooltipButton as FavoriteActionButton } from '../TooltipButton'
 import { CloseIcon, DragHandleIcon, EditIcon, FavoriteIcon, TrashIcon } from '../icons'
 import { getInitialCheckedCollectionIds } from './favoriteUtils'
+import GlobalModal from '../GlobalModal'
 
 export function FavoriteCollectionPickerModal() {
   const taskIds = useStore((s) => s.favoritePickerTaskIds)
@@ -59,6 +60,7 @@ export function FavoriteCollectionPickerModal() {
   }, [defaultFavoriteCollectionId, open, selectedTasks])
 
   useCloseOnEscape(open, closePicker)
+  useModalFocus(open, modalRef)
   usePreventBackgroundScroll(open, modalRef)
 
   useEffect(() => {
@@ -310,15 +312,14 @@ export function FavoriteCollectionPickerModal() {
     })
   }
 
-  return createPortal(
-    <div data-no-drag-select className="fixed inset-0 z-[105] flex items-center justify-center p-4 sm:p-0" onClick={closePicker}>
-      <div className="absolute inset-0 bg-[rgba(12,11,9,0.55)] backdrop-blur-sm animate-overlay-in" />
-      <div ref={modalRef} className="relative z-10 flex max-h-[85vh] w-full max-w-[400px] flex-col overflow-hidden rounded-[22px] border border-line2 bg-surface shadow-lift animate-modal-in" onClick={(e) => e.stopPropagation()}>
+  return (
+    <GlobalModal onClose={closePicker} className="p-4 sm:p-0">
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="favorite-picker-title" tabIndex={-1} className="relative z-10 flex max-h-[85vh] w-full max-w-[400px] flex-col overflow-hidden rounded-[22px] border border-line2 bg-surface shadow-lift animate-modal-in">
         <div className="px-6 pt-6 pb-4 shrink-0 relative border-b border-line">
           <FavoriteActionButton tooltip="关闭" onClick={closePicker} wrapperClassName="absolute right-5 top-5 inline-flex" className="shrink-0 rounded-[10px] p-1.5 text-ink-2 transition hover:bg-surface2 hover:text-ink">
             <CloseIcon className="h-5 w-5" />
           </FavoriteActionButton>
-          <h2 className="mb-2 pr-8 flex items-center gap-2.5 font-display text-lg font-semibold text-ink leading-snug">
+          <h2 id="favorite-picker-title" className="mb-2 pr-8 flex items-center gap-2.5 font-display text-lg font-semibold text-ink leading-snug">
             <FavoriteIcon filled className="h-5 w-5 shrink-0 text-accent" />
             保存到收藏夹
           </h2>
@@ -452,7 +453,6 @@ export function FavoriteCollectionPickerModal() {
           </div>
         </div>
       </div>
-    </div>,
-    document.body,
+    </GlobalModal>
   )
 }

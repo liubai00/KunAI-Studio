@@ -12,6 +12,7 @@ const round = (patch: Partial<AgentRound>): AgentRound => ({
   prompt: patch.prompt ?? '',
   inputImageIds: patch.inputImageIds ?? [],
   outputTaskIds: patch.outputTaskIds ?? [],
+  ...(patch.removedOutputTaskIds ? { removedOutputTaskIds: patch.removedOutputTaskIds } : {}),
   status: patch.status ?? 'done',
   error: patch.error ?? null,
   createdAt: patch.createdAt ?? 1,
@@ -55,7 +56,7 @@ describe('agent image references', () => {
   })
 
   it('keeps previous round image numbering stable after a task is removed', () => {
-    const rounds = [round({ index: 1, outputTaskIds: ['task-deleted', 'task-live'] })]
+    const rounds = [round({ index: 1, outputTaskIds: ['task-deleted', 'task-live'], removedOutputTaskIds: ['task-deleted'] })]
 
     expect(resolveAgentPromptImageReferences('参考 @第1轮图1 和 @第1轮图2', rounds, [
       task('task-live', ['image-live']),
@@ -110,7 +111,7 @@ describe('agent image references', () => {
   })
 
   it('replaces removed previous round references with removed_ref tags', () => {
-    const firstRound = round({ index: 1, outputTaskIds: ['task-deleted', 'task-live'] })
+    const firstRound = round({ index: 1, outputTaskIds: ['task-deleted', 'task-live'], removedOutputTaskIds: ['task-deleted'] })
     const currentRound = round({ index: 2, inputImageIds: [] })
 
     expect(replaceAgentPromptImageReferencesForApi(

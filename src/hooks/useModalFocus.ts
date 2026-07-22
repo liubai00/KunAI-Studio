@@ -1,12 +1,13 @@
 import { useEffect, useRef, type RefObject } from 'react'
 
-export function useModalFocus(active: boolean, dialogRef: RefObject<HTMLElement | null>) {
+export function useModalFocus(active: boolean, dialogRef: RefObject<HTMLElement | null>, explicitReturnFocusRef?: RefObject<HTMLElement | null>) {
   const returnFocusRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     if (!active) return
 
-    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    returnFocusRef.current = explicitReturnFocusRef?.current
+      ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
     dialogRef.current?.focus()
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -40,5 +41,5 @@ export function useModalFocus(active: boolean, dialogRef: RefObject<HTMLElement 
       if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus()
       returnFocusRef.current = null
     }
-  }, [active, dialogRef])
+  }, [active, dialogRef, explicitReturnFocusRef])
 }

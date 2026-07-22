@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import type { FavoriteCollection } from '../../types'
 import {
   createFavoriteCollection,
@@ -9,9 +8,11 @@ import {
   useStore,
 } from '../../store'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
+import { useModalFocus } from '../../hooks/useModalFocus'
 import { usePreventBackgroundScroll } from '../../hooks/usePreventBackgroundScroll'
 import { TooltipButton as FavoriteActionButton } from '../TooltipButton'
 import { CloseIcon, DragHandleIcon, EditIcon, FavoriteIcon, TrashIcon } from '../icons'
+import GlobalModal from '../GlobalModal'
 
 export function ManageCollectionsModal() {
   const open = useStore((s) => s.isManageCollectionsModalOpen)
@@ -46,6 +47,7 @@ export function ManageCollectionsModal() {
   const selectableCollections = collections
 
   useCloseOnEscape(open, closeManage)
+  useModalFocus(open, modalRef)
   usePreventBackgroundScroll(open, modalRef)
 
   useEffect(() => {
@@ -294,15 +296,14 @@ export function ManageCollectionsModal() {
     })
   }
 
-  return createPortal(
-    <div data-no-drag-select className="fixed inset-0 z-[105] flex items-center justify-center p-4 sm:p-0" onClick={closeManage}>
-      <div className="absolute inset-0 bg-[rgba(12,11,9,0.55)] backdrop-blur-sm animate-overlay-in" />
-      <div ref={modalRef} className="relative z-10 flex max-h-[85vh] w-full max-w-[400px] flex-col overflow-hidden rounded-[22px] bg-surface border border-line2 shadow-lift animate-modal-in" onClick={(e) => e.stopPropagation()}>
+  return (
+    <GlobalModal onClose={closeManage} className="p-4 sm:p-0">
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="manage-collections-title" tabIndex={-1} className="relative z-10 flex max-h-[85vh] w-full max-w-[400px] flex-col overflow-hidden rounded-[22px] bg-surface border border-line2 shadow-lift animate-modal-in">
         <div className="px-6 pt-6 pb-4 shrink-0 relative border-b border-line">
           <FavoriteActionButton tooltip="关闭" onClick={closeManage} wrapperClassName="absolute right-5 top-5 inline-flex" className="shrink-0 rounded-[10px] p-1.5 text-ink-3 transition hover:bg-surface2 hover:text-ink">
             <CloseIcon className="h-5 w-5" />
           </FavoriteActionButton>
-          <h2 className="mb-2 pr-8 flex items-center gap-2.5 text-lg font-semibold font-display text-ink leading-snug">
+          <h2 id="manage-collections-title" className="mb-2 pr-8 flex items-center gap-2.5 text-lg font-semibold font-display text-ink leading-snug">
             管理收藏夹
           </h2>
           <p className="text-[13px] text-ink-3 leading-relaxed">
@@ -412,7 +413,6 @@ export function ManageCollectionsModal() {
           </div>
         </div>
       </div>
-    </div>,
-    document.body,
+    </GlobalModal>
   )
 }

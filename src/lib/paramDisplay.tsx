@@ -5,6 +5,16 @@ import { getQualityDisplayLabel } from './quality'
 
 type ParamKey = keyof TaskParams
 
+function getLocalizedParamValue(paramKey: ParamKey, value: unknown) {
+  const text = String(value)
+  if (text === 'auto') return '自动'
+  if (text === 'true') return '开启'
+  if (text === 'false') return '关闭'
+  if (paramKey === 'output_format') return text.toUpperCase()
+  if (paramKey === 'moderation' && text === 'low') return '宽松'
+  return paramKey === 'quality' ? getQualityDisplayLabel(text) : text
+}
+
 interface ParamValueProps {
   task: TaskRecord
   paramKey: ParamKey
@@ -75,12 +85,8 @@ export function getParamDisplay(task: TaskRecord, paramKey: ParamKey, actualPara
     hasActualValue &&
     requestedRawValue !== 'auto' &&
     String(actualValue) !== String(requestedRawValue)
-  const displayValue = paramKey === 'quality'
-    ? getQualityDisplayLabel(String(displayRawValue))
-    : String(displayRawValue)
-  const requestedValue = paramKey === 'quality'
-    ? getQualityDisplayLabel(String(requestedRawValue))
-    : String(requestedRawValue)
+  const displayValue = getLocalizedParamValue(paramKey, displayRawValue)
+  const requestedValue = getLocalizedParamValue(paramKey, requestedRawValue)
 
   return {
     displayValue,

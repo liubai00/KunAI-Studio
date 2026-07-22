@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { useModalFocus } from '../hooks/useModalFocus'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { Checkbox } from './Checkbox'
 import { CopyIcon } from './icons'
+import GlobalModal from './GlobalModal'
 
 function renderMessage(message: string) {
   return message.split(/(`[^`]+`|「[^」]+」|\*\*[^*]+\*\*)/g).map((part, index) => {
@@ -50,6 +52,7 @@ export default function ConfirmDialog() {
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const [canConfirm, setCanConfirm] = useState(true)
   const [checkboxChecked, setCheckboxChecked] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const delay = confirmDialog?.minConfirmDelayMs ?? 0
@@ -78,6 +81,7 @@ export default function ConfirmDialog() {
   }
 
   useCloseOnEscape(Boolean(confirmDialog) && canConfirm, handleClose)
+  useModalFocus(Boolean(confirmDialog), dialogRef)
   usePreventBackgroundScroll(Boolean(confirmDialog))
 
   if (!confirmDialog) return null
@@ -89,17 +93,16 @@ export default function ConfirmDialog() {
   const customButtons = confirmDialog.buttons?.filter((button) => button.label.trim()) ?? []
 
   return (
-    <div
-      data-no-drag-select
-      className="fixed inset-0 z-[110] flex items-center justify-center p-4"
-      onClick={handleClose}
-    >
-      <div className="absolute inset-0 bg-[rgba(12,11,9,0.55)] backdrop-blur-sm animate-overlay-in" />
+    <GlobalModal layer="dialog" onClose={handleClose} className="p-4">
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-dialog-title"
+        tabIndex={-1}
         className="relative bg-surface border border-line2 rounded-2xl shadow-lift max-w-sm w-full p-6 z-10 animate-confirm-in"
-        onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-2 flex items-center gap-2 text-base font-display font-semibold text-ink">
+        <h3 id="confirm-dialog-title" className="mb-2 flex items-center gap-2 text-base font-display font-semibold text-ink">
           {confirmDialog.icon === 'info' && (
             <svg className="h-5 w-5 shrink-0 text-accent" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="10" />
@@ -166,6 +169,6 @@ export default function ConfirmDialog() {
           </div>
         )}
       </div>
-    </div>
+    </GlobalModal>
   )
 }
