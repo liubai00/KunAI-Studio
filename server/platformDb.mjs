@@ -1419,20 +1419,15 @@ export class PlatformDatabase {
         if (!round || round.status !== 'open') return { error: createError('Agent 计费轮次无效或已结束', 409, 'ROUND_FINISHED') }
       }
 
-      // 老会员权益继续有效；非会员只能使用图片次数，不再使用现金余额兜底。
-      if (user.membership_expires_at && Number(user.membership_expires_at) > now) {
-        return insertJob('membership', 0, 0)
+      const availableMicros = Number(user.balance_micros) - Number(user.reserved_micros)
+      if (availableMicros < priceMicros) {
+        return { error: createError('余额不足，请充值后再生成', 402, 'INSUFFICIENT_BALANCE') }
       }
 
-      const availableCredits = Number(user.image_credits) - Number(user.reserved_credits)
-      if (availableCredits >= 1) {
-        this.db.prepare(`
-          UPDATE users SET reserved_credits = reserved_credits + 1, updated_at = ? WHERE id = ?
-        `).run(now, userId)
-        return insertJob('credits', 0, 1)
-      }
-
-      return { error: createError('生成次数不足，请开通会员或购买生成次数', 402, 'INSUFFICIENT_CREDITS') }
+      this.db.prepare(`
+        UPDATE users SET reserved_micros = reserved_micros + ?, updated_at = ? WHERE id = ?
+      `).run(priceMicros, now, userId)
+      return insertJob('balance', priceMicros, 0)
     })
     const result = run()
     if (result.error) throw result.error
@@ -1458,11 +1453,12 @@ export class PlatformDatabase {
       const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(job.user_id)
       const chargeSource = job.charge_source || 'balance'
       if (chargeSource === 'membership') {
-        // Membership: unlimited generations, no wallet deduction.
+        // 兼容升级前已经预留的会员任务，新任务统一使用余额。
         this.db.prepare(`
           UPDATE users SET request_count = request_count + 1, updated_at = ? WHERE id = ?
         `).run(now, job.user_id)
       } else if (chargeSource === 'credits') {
+        // 兼容升级前已经预留的次数任务，新任务统一使用余额。
         const creditsUsed = Number(job.credits_used) || 1
         if (!user || user.reserved_credits < creditsUsed || user.image_credits < creditsUsed) {
           throw createError('生成任务结算状态异常', 500, 'BILLING_STATE_INVALID')
@@ -1529,7 +1525,7 @@ export class PlatformDatabase {
           UPDATE users SET reserved_micros = MAX(0, reserved_micros - ?), updated_at = ? WHERE id = ?
         `).run(job.price_micros, now, job.user_id)
       }
-      // membership jobs freeze nothing, so there is nothing to refund.
+      // 旧会员任务没有预留额度，无需释放。
       this.db.prepare(`
         UPDATE generation_jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?
       `).run(String(message || '生成失败').slice(0, 500), now, job.id)

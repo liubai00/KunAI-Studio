@@ -1,4 +1,4 @@
-import { Bot, ChevronDown, LogOut, ShieldCheck, Store, Ticket, Users, Wallet } from 'lucide-react'
+import { Bot, ChevronDown, LogOut, ShieldCheck, Ticket, Users, Wallet } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isPlatformModeEnabled } from '../../lib/platformMode'
@@ -6,7 +6,6 @@ import { formatPlatformQuota } from '../../lib/platformCurrency'
 import { usePlatformStore } from '../../platformStore'
 import BillingModal from './BillingModal'
 import AdminUsersModal from './AdminUsersModal'
-import AdminProductsModal from './AdminProductsModal'
 import AdminRedemptionModal from './AdminRedemptionModal'
 import AdminAgentModelsModal from './AdminAgentModelsModal'
 
@@ -18,14 +17,12 @@ export default function PlatformAccount() {
   const [open, setOpen] = useState(false)
   const [showBilling, setShowBilling] = useState(false)
   const [showUsers, setShowUsers] = useState(false)
-  const [showProducts, setShowProducts] = useState(false)
   const [showRedemption, setShowRedemption] = useState(false)
   const [showAgentModels, setShowAgentModels] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const accountButtonRef = useRef<HTMLButtonElement>(null)
   const closeBilling = useCallback(() => setShowBilling(false), [])
   const closeUsers = useCallback(() => setShowUsers(false), [])
-  const closeProducts = useCallback(() => setShowProducts(false), [])
   const closeRedemption = useCallback(() => setShowRedemption(false), [])
   const closeAgentModels = useCallback(() => setShowAgentModels(false), [])
 
@@ -98,16 +95,6 @@ export default function PlatformAccount() {
                   type="button"
                   onClick={() => {
                     setOpen(false)
-                    setShowProducts(true)
-                  }}
-                  className="flex w-full items-center gap-2 border-t border-line px-4 py-3 text-sm text-ink-2 hover:bg-surface2"
-                >
-                  <Store className="h-4 w-4 text-accent" />商品与定价
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false)
                     setShowAgentModels(true)
                   }}
                   className="flex w-full items-center gap-2 border-t border-line px-4 py-3 text-sm text-ink-2 hover:bg-surface2"
@@ -134,7 +121,6 @@ export default function PlatformAccount() {
       </div>
       {showBilling && createPortal(<BillingModal onClose={closeBilling} returnFocusRef={accountButtonRef} />, document.body)}
       {showUsers && createPortal(<AdminUsersModal onClose={closeUsers} returnFocusRef={accountButtonRef} />, document.body)}
-      {showProducts && createPortal(<AdminProductsModal onClose={closeProducts} returnFocusRef={accountButtonRef} />, document.body)}
       {showRedemption && createPortal(<AdminRedemptionModal onClose={closeRedemption} returnFocusRef={accountButtonRef} />, document.body)}
       {showAgentModels && createPortal(<AdminAgentModelsModal onClose={closeAgentModels} returnFocusRef={accountButtonRef} />, document.body)}
     </>

@@ -30,7 +30,7 @@ test('production refuses to start without an explicit HTTPS app origin', () => {
   }), /HTTPS/)
 })
 
-test('self-contained platform supports email auth, image credits, CNY billing and payment idempotency', async (t) => {
+test('self-contained platform charges image generations from CNY balance and keeps payment idempotent', async (t) => {
   const resultDir = await mkdtemp(join(tmpdir(), 'image-studio-results-'))
   const db = new PlatformDatabase({ path: ':memory:' })
   const validImage = await sharp({
@@ -188,10 +188,10 @@ test('self-contained platform supports email auth, image credits, CNY billing an
 
   response = await fetch(`${baseUrl}/api/platform/billing`, { headers: { Cookie: cookie } })
   let billing = await response.json()
-  assert.equal(billing.data.quota, 1000000)
-  assert.equal(billing.data.used_quota, 0)
-  assert.equal(billing.data.available_credits, 1)
-  assert.equal(billing.data.entries.filter((entry) => entry.kind === 'credit_charge').length, 1)
+  assert.equal(billing.data.quota, 930000)
+  assert.equal(billing.data.used_quota, 70000)
+  assert.equal(billing.data.available_credits, 2)
+  assert.equal(billing.data.entries.filter((entry) => entry.kind === 'image_charge').length, 1)
 
   upstreamMode = 'invalid'
   response = await fetch(`${baseUrl}/api-proxy/images/generations`, {
@@ -209,9 +209,9 @@ test('self-contained platform supports email auth, image credits, CNY billing an
   assert.equal(response.status, 500)
   response = await fetch(`${baseUrl}/api/platform/billing`, { headers: { Cookie: cookie } })
   billing = await response.json()
-  assert.equal(billing.data.quota, 1000000)
-  assert.equal(billing.data.used_quota, 0)
-  assert.equal(billing.data.available_credits, 1)
+  assert.equal(billing.data.quota, 930000)
+  assert.equal(billing.data.used_quota, 70000)
+  assert.equal(billing.data.available_credits, 2)
 
   const paymentBody = JSON.stringify({
     provider: 'internal',
@@ -239,7 +239,7 @@ test('self-contained platform supports email auth, image credits, CNY billing an
 
   response = await fetch(`${baseUrl}/api/platform/billing`, { headers: { Cookie: cookie } })
   billing = await response.json()
-  assert.equal(billing.data.quota, 2000000)
+  assert.equal(billing.data.quota, 1930000)
 
   response = await fetch(`${baseUrl}/api/platform/auth/logout`, {
     method: 'POST',

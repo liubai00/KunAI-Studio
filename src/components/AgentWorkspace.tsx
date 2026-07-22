@@ -1156,7 +1156,7 @@ export default function AgentWorkspace() {
                           <span>输出：{round.billing.outputTokens} tokens</span>
                           <span>模型调用：{formatCnyMicros(round.billing.textChargeMicros)}</span>
                           {round.billing.searchCalls > 0 && <span>联网搜索：{round.billing.searchCalls} 次 / {formatCnyMicros(round.billing.searchChargeMicros)}</span>}
-                          {(round.billing.imageCount || 0) > 0 && <span>生图：{round.billing.imageCount} 张 / 扣减 {round.billing.imageCreditsUsed || 0} 次</span>}
+                          {(round.billing.imageCount || 0) > 0 && <span>生图：{round.billing.imageCount} 张 / {formatCnyMicros(Math.max(0, round.billing.totalMicros - round.billing.textChargeMicros - round.billing.searchChargeMicros))}</span>}
                         </div>
                       </details>
                     )}

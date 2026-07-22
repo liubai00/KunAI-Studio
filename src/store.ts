@@ -57,6 +57,7 @@ import { formatExportFileTime } from './lib/exportFileName'
 import { buildExportZip, readExportZip, readExportZipFileAsDataUrl } from './lib/exportZip'
 import { createUserScopedStorage } from './lib/userStorage'
 import { createPlatformSettings, isPlatformModeEnabled, PLATFORM_IMAGE_PROFILE_ID } from './lib/platformMode'
+import { getPlatformGenerationPriceMicros } from './lib/platformCurrency'
 import { usePlatformStore } from './platformStore'
 
 export const ALL_FAVORITES_COLLECTION_ID = '__all_favorites__'
@@ -2473,6 +2474,17 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
   if (!prompt.trim()) {
     showToast('请输入提示词', 'error')
     return
+  }
+
+  if (isPlatformModeEnabled() && activeProfile.id === PLATFORM_IMAGE_PROFILE_ID) {
+    const platform = usePlatformStore.getState()
+    const billingParams = normalizeParamsForSettings(params, requestSettings, { hasInputImages: inputImages.length > 0 })
+    const generationPriceMicros = getPlatformGenerationPriceMicros(platform.status?.image_studio?.image_unit_price || 0, billingParams.n)
+    const availableMicros = Math.max(0, (platform.user?.quota || 0) - (platform.user?.reserved_quota || 0))
+    if (platform.user && availableMicros < generationPriceMicros) {
+      showToast('余额不足，请充值后再生成', 'error')
+      return
+    }
   }
 
   let orderedInputImages = inputImages

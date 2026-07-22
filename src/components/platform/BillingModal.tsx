@@ -1,11 +1,11 @@
-import { Coins, Crown, LoaderCircle, ScanLine, Ticket, Wallet, X } from 'lucide-react'
+import { Image, LoaderCircle, ScanLine, Ticket, Wallet, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
-import { createPlatformBalanceCheckout, createPlatformProductCheckout } from '../../lib/platformCheckout'
+import { createPlatformBalanceCheckout } from '../../lib/platformCheckout'
 import type { PlatformPaymentType, PlatformProductCheckout } from '../../lib/platformCheckout'
 import { formatPlatformPrice, formatPlatformQuota } from '../../lib/platformCurrency'
 import { usePlatformStore } from '../../platformStore'
-import type { PlatformBilling, PlatformProduct } from '../../platformStore'
+import type { PlatformBilling } from '../../platformStore'
 import PaymentQrModal from './PaymentQrModal'
 
 interface BillingModalProps {
@@ -26,7 +26,6 @@ export default function BillingModal(props: BillingModalProps) {
   const dialogRef = useRef<HTMLElement>(null)
   const [billing, setBilling] = useState<PlatformBilling | null>(null)
   const [billingError, setBillingError] = useState<string | null>(null)
-  const [checkoutProductId, setCheckoutProductId] = useState<string | null>(null)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
   const [activeCheckout, setActiveCheckout] = useState<{ checkout: PlatformProductCheckout; productName: string } | null>(null)
   const [payType, setPayType] = useState<PlatformPaymentType>('wxpay')
@@ -79,37 +78,13 @@ export default function BillingModal(props: BillingModalProps) {
   if (!user) return null
 
   const account = billing || user
-  const products = billing?.products ?? status?.image_studio?.products ?? []
-  const memberships = products.filter((product) => product.kind === 'membership')
-  const creditPacks = products.filter((product) => product.kind === 'credits')
-  const availableCredits = account.available_credits ?? Math.max(0, (account.image_credits ?? 0) - (account.reserved_credits ?? 0))
-  const membershipActive = Boolean(account.membership_active && account.membership_expires_at)
   const rechargeMin = billing?.recharge_min ?? status?.image_studio?.recharge_min ?? 1
   const rechargeMax = billing?.recharge_max ?? status?.image_studio?.recharge_max ?? 5000
   const rechargeValue = Number(rechargeAmount)
   const rechargeValid = Number.isFinite(rechargeValue) && rechargeValue >= rechargeMin && rechargeValue <= rechargeMax && /^\d+(?:\.\d{1,2})?$/.test(rechargeAmount.trim())
 
-  const handlePurchase = async (productId: string) => {
-    if (!paymentEnabled || checkoutProductId || recharging) return
-    setCheckoutProductId(productId)
-    setCheckoutError(null)
-    try {
-      const checkout = await createPlatformProductCheckout(productId, payType)
-      if (checkout.payment_display === 'redirect' && checkout.checkout_url) {
-        window.location.assign(checkout.checkout_url)
-        return
-      }
-      const product = products.find((item) => item.id === productId)
-      setActiveCheckout({ checkout, productName: product?.name || '生图次数包' })
-      setCheckoutProductId(null)
-    } catch (err) {
-      setCheckoutError(err instanceof Error ? err.message : String(err))
-      setCheckoutProductId(null)
-    }
-  }
-
   const handleRecharge = async () => {
-    if (!paymentEnabled || !rechargeValid || recharging || checkoutProductId) return
+    if (!paymentEnabled || !rechargeValid || recharging) return
     setRecharging(true)
     setCheckoutError(null)
     try {
@@ -118,7 +93,7 @@ export default function BillingModal(props: BillingModalProps) {
         window.location.assign(checkout.checkout_url)
         return
       }
-      setActiveCheckout({ checkout, productName: '对话余额充值' })
+      setActiveCheckout({ checkout, productName: '账户余额充值' })
       setRecharging(false)
     } catch (err) {
       setCheckoutError(err instanceof Error ? err.message : String(err))
@@ -135,8 +110,6 @@ export default function BillingModal(props: BillingModalProps) {
       const result = await redeemCode(code)
       const granted = result.granted || {}
       const parts: string[] = []
-      if (granted.credits) parts.push(`${granted.credits} 次`)
-      if (granted.membershipDays) parts.push(`会员 ${granted.membershipDays} 天`)
       if (granted.balanceMicros) parts.push(formatPlatformQuota(granted.balanceMicros, status))
       setRedeemMsg({ ok: true, text: `兑换成功：${parts.join(' + ') || '已到账'}` })
       setRedeemInput('')
@@ -156,35 +129,7 @@ export default function BillingModal(props: BillingModalProps) {
 
   const closePayment = () => {
     setActiveCheckout(null)
-    setCheckoutProductId(null)
     setRecharging(false)
-  }
-
-  const renderProductRow = (product: PlatformProduct) => {
-    const isMembership = product.kind === 'membership'
-    const spec = isMembership ? `${product.duration_days} 天不限次生成` : `${product.credits} 次生成额度`
-    const buyLabel = isMembership && membershipActive ? '续费并显示收款码' : '显示收款码'
-    return (
-      <div key={product.id} className="flex items-center gap-3 rounded-xl border border-line bg-surface p-3 transition-colors hover:border-line2">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent-ink">
-          {isMembership ? <Crown className="h-5 w-5" /> : <Coins className="h-5 w-5" />}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="truncate text-sm font-semibold text-ink">{product.name}</span>
-            <span className="shrink-0 font-mono text-sm font-semibold text-accent-ink">{formatPlatformPrice(product.price, status)}</span>
-          </div>
-          <div className="mt-0.5 truncate text-xs text-ink-3">{spec}{product.description ? ` · ${product.description}` : ''}</div>
-        </div>
-        {paymentEnabled ? (
-          <button type="button" onClick={() => void handlePurchase(product.id)} disabled={checkoutProductId !== null || recharging} className="inline-flex h-9 shrink-0 items-center justify-center gap-1 rounded-[11px] bg-[linear-gradient(150deg,var(--accent),#0891b2)] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition hover:-translate-y-px active:scale-[0.99] disabled:opacity-50 disabled:hover:translate-y-0">
-            {checkoutProductId === product.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <>{buyLabel}<ScanLine className="h-3.5 w-3.5" /></>}
-          </button>
-        ) : (
-          <button type="button" disabled className="h-9 shrink-0 rounded-[11px] border border-line bg-surface2 px-4 text-sm font-medium text-ink-3">未开放</button>
-        )}
-      </div>
-    )
   }
 
   return (
@@ -204,28 +149,19 @@ export default function BillingModal(props: BillingModalProps) {
           {!paymentEnabled && (
             <div role="status" className="rounded-2xl border border-line bg-surface2 px-4 py-3 text-sm text-ink-2">
               <div className="font-semibold text-ink">支付服务暂未配置</div>
-              <p className="mt-1 text-xs leading-5 text-ink-3">余额、次数、会员状态和历史账单仍可正常查看；充值与购买入口将在管理员完成 Dulupay 配置后开放。</p>
+              <p className="mt-1 text-xs leading-5 text-ink-3">余额和历史账单仍可正常查看；充值入口将在管理员完成 Dulupay 配置后开放。</p>
             </div>
           )}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <div className={`min-w-0 rounded-2xl border p-4 ${membershipActive ? 'border-transparent bg-accent-soft' : 'border-line bg-surface2'}`}>
-              <div className="flex items-center gap-2 text-xs font-medium text-ink-3"><Crown className="h-4 w-4 text-accent" />会员状态</div>
-              <div className={`mt-2 break-words text-sm font-semibold sm:text-base ${membershipActive ? 'text-accent-ink' : 'text-ink'}`}>
-                {membershipActive ? '生效中' : '未生效'}
-              </div>
-              <div className="mt-0.5 text-[11px] text-ink-3">
-                {membershipActive && account.membership_expires_at ? `有效期至 ${new Date(account.membership_expires_at).toLocaleDateString('zh-CN')}` : '已停止销售，新购请购买生图次数'}
-              </div>
-            </div>
-            <div className="min-w-0 rounded-2xl border border-line bg-surface2 p-4">
-              <div className="flex items-center gap-2 text-xs font-medium text-ink-3"><Coins className="h-4 w-4 text-accent" />剩余次数</div>
-              <div className="mt-2 break-words font-mono text-lg font-semibold text-ink sm:text-xl">{availableCredits}</div>
-              <div className="mt-0.5 text-[11px] text-ink-3">生图仅使用次数，不扣对话余额</div>
-            </div>
+          <div className="grid grid-cols-2 gap-3">
             <div id="billing-description" className="min-w-0 rounded-2xl border border-line bg-surface2 p-4">
               <div className="flex items-center gap-2 text-xs font-medium text-ink-3"><Wallet className="h-4 w-4 text-info" />可用余额</div>
               <div className="mt-2 break-words font-mono text-lg font-semibold text-ink sm:text-xl">{formatPlatformQuota(Math.max(0, account.quota - (account.reserved_quota || 0)), status)}</div>
-              <div className="mt-0.5 text-[11px] text-ink-3">用于 Agent 对话与联网搜索 · 累计消费 {formatPlatformQuota(account.used_quota, status)}</div>
+              <div className="mt-0.5 text-[11px] text-ink-3">用于生图、Agent 对话与联网搜索 · 累计消费 {formatPlatformQuota(account.used_quota, status)}</div>
+            </div>
+            <div className="min-w-0 rounded-2xl border border-line bg-surface2 p-4">
+              <div className="flex items-center gap-2 text-xs font-medium text-ink-3"><Image className="h-4 w-4 text-accent" />生图单价</div>
+              <div className="mt-2 break-words font-mono text-lg font-semibold text-ink sm:text-xl">{formatPlatformPrice(imageUnitPrice, status)}/张</div>
+              <div className="mt-0.5 text-[11px] text-ink-3">生成成功后扣除余额，失败或取消不扣费</div>
             </div>
           </div>
 
@@ -242,30 +178,10 @@ export default function BillingModal(props: BillingModalProps) {
             </div>
           )}
 
-          {(memberships.length > 0 || creditPacks.length > 0) && (
-            <div className="flex flex-col gap-4">
-              {memberships.length > 0 && (
-                <div>
-                  <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink"><Crown className="h-4 w-4 text-accent" />{membershipActive ? '续费会员' : '开通会员'}</h3>
-                  <div className="flex flex-col gap-2">{memberships.map(renderProductRow)}</div>
-                </div>
-              )}
-              {creditPacks.length > 0 && (
-                <div>
-                  <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink"><Coins className="h-4 w-4 text-accent" />购买次数包</h3>
-                  <div className="flex flex-col gap-2">{creditPacks.map(renderProductRow)}</div>
-                </div>
-              )}
-              {imageUnitPrice > 0 && (
-                <p className="text-xs text-ink-3">图片参考单价 {formatPlatformPrice(imageUnitPrice, status)}/张 · 实际按生图次数扣减 · 失败请求自动返还次数</p>
-              )}
-            </div>
-          )}
-
           <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface2 p-4 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
-              <div className="text-sm font-medium text-ink">对话余额充值</div>
-              <div className="mt-0.5 text-xs text-ink-3">用于 Agent 模型调用与联网搜索；生图仍单独扣减次数</div>
+              <div className="text-sm font-medium text-ink">账户余额充值</div>
+              <div className="mt-0.5 text-xs text-ink-3">充值后可用于生图、Agent 模型调用与联网搜索</div>
               <div className="mt-1 text-[11px] text-ink-3">单次充值 ¥{rechargeMin.toFixed(2)}–¥{rechargeMax.toFixed(2)}</div>
             </div>
             {paymentEnabled ? (
@@ -274,7 +190,7 @@ export default function BillingModal(props: BillingModalProps) {
                   <span className="mr-1 text-sm text-ink-3">¥</span>
                   <input type="number" min={rechargeMin} max={rechargeMax} step="0.01" inputMode="decimal" aria-label="充值金额" value={rechargeAmount} onChange={(event) => { setRechargeAmount(event.target.value); setCheckoutError(null) }} onKeyDown={(event) => { if (event.key === 'Enter') void handleRecharge() }} className="min-w-0 flex-1 bg-transparent font-mono text-sm text-ink outline-none" />
                 </label>
-                <button type="button" onClick={() => void handleRecharge()} disabled={!rechargeValid || recharging || checkoutProductId !== null} className="inline-flex h-10 items-center justify-center gap-2 rounded-[11px] bg-[linear-gradient(150deg,var(--accent),#0891b2)] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition hover:-translate-y-px active:scale-[0.99] disabled:opacity-50 disabled:hover:translate-y-0">
+                <button type="button" onClick={() => void handleRecharge()} disabled={!rechargeValid || recharging} className="inline-flex h-10 items-center justify-center gap-2 rounded-[11px] bg-[linear-gradient(150deg,var(--accent),#0891b2)] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition hover:-translate-y-px active:scale-[0.99] disabled:opacity-50 disabled:hover:translate-y-0">
                   {recharging ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <>生成收款码<ScanLine className="h-4 w-4" /></>}
                 </button>
               </div>

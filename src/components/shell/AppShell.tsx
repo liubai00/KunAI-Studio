@@ -145,8 +145,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
             {user && (
               <button type="button" onClick={() => navigate('account')} className="kunai-usage-pill" aria-label="查看账户用量">
                 <span className="hidden text-ink-3 sm:inline">余额</span><span className="font-mono font-semibold text-ink">{balance}</span>
-                <span className="h-3 w-px bg-line2" />
-                <span className="hidden text-ink-3 sm:inline">生图</span><span className="font-mono font-semibold text-ink">{user.available_credits ?? 0}</span>
               </button>
             )}
             <button type="button" onClick={toggleTheme} className="kunai-icon-button" aria-label={resolvedTheme === 'dark' ? '切换浅色主题' : '切换深色主题'}>

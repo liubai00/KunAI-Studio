@@ -37,7 +37,7 @@ export function formatPlatformPrice(price: number, status: PlatformStatus | null
     return `${formatNumber(price * quotaPerUnit, 0, 0)} Tokens`
   }
 
-  const digits = price < 1 ? 3 : 2
+  const digits = Math.abs(price - Math.round(price * 100) / 100) < 0.0000001 ? 2 : 3
   if (type === 'CNY') return `¥${formatNumber(price, digits, 4)}`
   if (type === 'CUSTOM') {
     const rate = status?.custom_currency_exchange_rate || 1
@@ -49,4 +49,10 @@ export function formatPlatformPrice(price: number, status: PlatformStatus | null
     minimumFractionDigits: digits,
     maximumFractionDigits: 4,
   }).format(price)
+}
+
+export function getPlatformGenerationPriceMicros(unitPrice: number, count: number) {
+  const unitPriceMicros = Math.max(0, Math.round((Number.isFinite(unitPrice) ? unitPrice : 0) * 1000000))
+  const imageCount = Math.max(1, Math.trunc(Number.isFinite(count) ? count : 1))
+  return unitPriceMicros * imageCount
 }

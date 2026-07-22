@@ -85,20 +85,19 @@ test('opaque sessions validate CSRF and can be revoked', () => {
   db.close()
 })
 
-test('failed image jobs release credit reservations and successful jobs charge once', () => {
+test('failed image jobs release balance reservations and successful jobs charge once', () => {
   const db = new PlatformDatabase({ path: ':memory:' })
   const user = createUser(db)
-  db.applyCredits(user.id, 1, Date.now())
   const failed = db.reserveGeneration({
     userId: user.id,
     idempotencyKey: 'failed-request-key',
     requestHash: 'failed-hash',
     priceMicros: 70000,
   })
-  assert.equal(db.getUserById(user.id).reservedCredits, 1)
+  assert.equal(db.getUserById(user.id).reservedMicros, 70000)
   db.failGeneration(failed.job.id, 'upstream failed')
   assert.equal(db.getUserById(user.id).balanceMicros, 1000000)
-  assert.equal(db.getUserById(user.id).reservedCredits, 0)
+  assert.equal(db.getUserById(user.id).reservedMicros, 0)
 
   const successful = db.reserveGeneration({
     userId: user.id,
@@ -118,11 +117,11 @@ test('failed image jobs release credit reservations and successful jobs charge o
     httpStatus: 200,
   })
   const chargedUser = db.getUserById(user.id)
-  assert.equal(chargedUser.balanceMicros, 1000000)
-  assert.equal(chargedUser.usedMicros, 0)
+  assert.equal(chargedUser.balanceMicros, 930000)
+  assert.equal(chargedUser.usedMicros, 70000)
   assert.equal(chargedUser.imageCredits, 0)
   assert.equal(chargedUser.requestCount, 1)
-  assert.equal(db.listLedger(user.id).filter((entry) => entry.kind === 'credit_charge').length, 1)
+  assert.equal(db.listLedger(user.id).filter((entry) => entry.kind === 'image_charge').length, 1)
 
   const repeated = db.reserveGeneration({
     userId: user.id,
@@ -207,10 +206,9 @@ test('image idempotency replay cannot change its agent billing round', () => {
   db.close()
 })
 
-test('concurrent image reservations cannot exceed available credits', () => {
+test('concurrent image reservations cannot exceed available balance', () => {
   const db = new PlatformDatabase({ path: ':memory:' })
   const user = createUser(db, 'small@example.com', 100000)
-  db.applyCredits(user.id, 1, Date.now())
   db.reserveGeneration({
     userId: user.id,
     idempotencyKey: 'first-reservation',
@@ -222,7 +220,8 @@ test('concurrent image reservations cannot exceed available credits', () => {
     idempotencyKey: 'second-reservation',
     requestHash: 'second',
     priceMicros: 70000,
-  }), /生成次数不足/)
+  }), (err) => err.code === 'INSUFFICIENT_BALANCE' && /余额不足/.test(err.message))
+  assert.equal(db.getUserById(user.id).reservedMicros, 70000)
   db.close()
 })
 
@@ -275,42 +274,45 @@ test('explicit admin email configuration promotes an existing account', () => {
 
 const settleResult = { path: 'result.bin', hash: 'result-hash', contentType: 'image/png', httpStatus: 200 }
 
-test('image credits are consumed and cash balance is not a fallback', () => {
+test('successful images charge balance while failures only release the reservation', () => {
   const db = new PlatformDatabase({ path: ':memory:' })
   const admin = createUser(db, 'admin-credits@example.com', 0, 10)
-  const user = createUser(db, 'credits@example.com', 1000000)
+  const user = createUser(db, 'credits@example.com', 200000)
   db.adminGrantCredits(admin.id, user.id, 2, 'test grant')
   assert.equal(db.getUserById(user.id).imageCredits, 2)
 
   const reservation = db.reserveGeneration({ userId: user.id, idempotencyKey: 'k1', requestHash: 'h1', priceMicros: 70000 })
-  assert.equal(reservation.job.charge_source, 'credits')
-  assert.equal(db.getUserById(user.id).reservedCredits, 1)
-  assert.equal(db.getUserById(user.id).reservedMicros, 0)
+  assert.equal(reservation.job.charge_source, 'balance')
+  assert.equal(db.getUserById(user.id).reservedCredits, 0)
+  assert.equal(db.getUserById(user.id).reservedMicros, 70000)
 
   db.settleGeneration(reservation.job.id, settleResult)
   const afterSettle = db.getUserById(user.id)
-  assert.equal(afterSettle.imageCredits, 1)
+  assert.equal(afterSettle.imageCredits, 2)
   assert.equal(afterSettle.reservedCredits, 0)
-  assert.equal(afterSettle.balanceMicros, 1000000)
-  assert.equal(db.listLedger(user.id).filter((entry) => entry.kind === 'credit_charge').length, 1)
+  assert.equal(afterSettle.reservedMicros, 0)
+  assert.equal(afterSettle.balanceMicros, 130000)
+  assert.equal(db.listLedger(user.id).filter((entry) => entry.kind === 'image_charge').length, 1)
 
   const failing = db.reserveGeneration({ userId: user.id, idempotencyKey: 'k2', requestHash: 'h2', priceMicros: 70000 })
   db.failGeneration(failing.job.id, 'boom')
-  assert.equal(db.getUserById(user.id).imageCredits, 1)
+  assert.equal(db.getUserById(user.id).imageCredits, 2)
   assert.equal(db.getUserById(user.id).reservedCredits, 0)
+  assert.equal(db.getUserById(user.id).reservedMicros, 0)
+  assert.equal(db.getUserById(user.id).balanceMicros, 130000)
 
   const consume = db.reserveGeneration({ userId: user.id, idempotencyKey: 'k3', requestHash: 'h3', priceMicros: 70000 })
   db.settleGeneration(consume.job.id, settleResult)
-  assert.equal(db.getUserById(user.id).imageCredits, 0)
+  assert.equal(db.getUserById(user.id).imageCredits, 2)
 
-  assert.throws(() => db.reserveGeneration({ userId: user.id, idempotencyKey: 'k4', requestHash: 'h4', priceMicros: 70000 }), /生成次数不足/)
-  assert.equal(db.getUserById(user.id).balanceMicros, 1000000)
+  assert.throws(() => db.reserveGeneration({ userId: user.id, idempotencyKey: 'k4', requestHash: 'h4', priceMicros: 70000 }), (err) => err.code === 'INSUFFICIENT_BALANCE')
+  assert.equal(db.getUserById(user.id).balanceMicros, 60000)
   assert.equal(db.getUserById(user.id).reservedMicros, 0)
   assert.equal(db.getGenerationByKey(user.id, 'k4'), undefined)
   db.close()
 })
 
-test('active membership makes generations free', () => {
+test('active membership no longer bypasses image balance charges', () => {
   const db = new PlatformDatabase({ path: ':memory:' })
   const admin = createUser(db, 'admin-member@example.com', 0, 10)
   const user = createUser(db, 'member@example.com', 100000)
@@ -318,12 +320,12 @@ test('active membership makes generations free', () => {
   assert.ok(db.getUserById(user.id).membershipExpiresAt > Date.now())
 
   const reservation = db.reserveGeneration({ userId: user.id, idempotencyKey: 'mk', requestHash: 'mh', priceMicros: 70000 })
-  assert.equal(reservation.job.charge_source, 'membership')
-  assert.equal(reservation.job.price_micros, 0)
+  assert.equal(reservation.job.charge_source, 'balance')
+  assert.equal(reservation.job.price_micros, 70000)
   db.settleGeneration(reservation.job.id, settleResult)
 
   const after = db.getUserById(user.id)
-  assert.equal(after.balanceMicros, 100000)
+  assert.equal(after.balanceMicros, 30000)
   assert.equal(after.imageCredits, 0)
   assert.equal(after.requestCount, 1)
   db.close()
@@ -677,7 +679,6 @@ test('agent and search calls reserve, settle and aggregate idempotently by visib
   db.failAgentCall(failed.call.id, 'upstream failed')
   assert.equal(db.getUserById(user.id).reservedMicros, 0)
 
-  db.applyCredits(user.id, 1, Date.now())
   const round = db.getBillingRound({ userId: user.id, conversationId: 'conversation-a', roundId: 'round-a' })
   const image = db.reserveGeneration({
     userId: user.id,
@@ -697,13 +698,13 @@ test('agent and search calls reserve, settle and aggregate idempotently by visib
     searchCount: 1,
     searchCredits: 2,
     imageCount: 1,
-    imageCreditsUsed: 1,
-    totalMicros: 800,
+    imageCreditsUsed: 0,
+    totalMicros: 70800,
   })
   assert.equal(aggregated.agentMicros, 500)
   assert.equal(aggregated.searchMicros, 300)
-  assert.equal(db.getUserById(user.id).balanceMicros, 999200)
-  assert.equal(db.listLedger(user.id).filter((entry) => ['agent_charge', 'search_charge'].includes(entry.kind)).length, 2)
+  assert.equal(db.getUserById(user.id).balanceMicros, 929200)
+  assert.equal(db.listLedger(user.id).filter((entry) => ['agent_charge', 'search_charge', 'image_charge'].includes(entry.kind)).length, 3)
   assert.equal(db.finishBillingRound({ userId: user.id, conversationId: 'conversation-a', roundId: 'round-a' }).status, 'completed')
   assert.equal(db.listBillingRounds(user.id)[0].id, round.id)
   db.close()

@@ -9,6 +9,7 @@ import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, 
 import { getImageSizeTier, normalizeImageSize } from '../lib/size'
 import { getQualityValueForSizeTier, QUALITY_TIER_OPTIONS } from '../lib/quality'
 import { isPlatformModeEnabled, PLATFORM_IMAGE_PROFILE_ID } from '../lib/platformMode'
+import { formatPlatformPrice, getPlatformGenerationPriceMicros } from '../lib/platformCurrency'
 import { usePlatformStore } from '../platformStore'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { getSafeBoundingClientRect } from '../lib/domRect'
@@ -427,6 +428,7 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
   const platformAgentModels = usePlatformStore((s) => s.agentModels)
   const defaultAgentModel = usePlatformStore((s) => s.defaultAgentModel)
   const platformStatus = usePlatformStore((s) => s.status)
+  const platformUser = usePlatformStore((s) => s.user)
 
   const filteredTasks = useMemo(() => {
     const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
@@ -739,13 +741,31 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
       : normalizeSettings({ ...settings, activeProfileId: activeProfile.id })
   ), [activeProfile.id, settingsActiveProfile.id, settings])
   const hasSubmitApiConfig = Boolean(activeProfile.apiKey)
-  const canSubmit = Boolean(prompt.trim() && hasSubmitApiConfig && !activeAgentIsRunning)
+  const platformGenerationCount = normalizeParamsForSettings(params, effectiveSettings, { hasInputImages: inputImages.length > 0 }).n
+  const imageUnitPrice = platformStatus?.image_studio?.image_unit_price || 0
+  const generationPriceMicros = getPlatformGenerationPriceMicros(imageUnitPrice, platformGenerationCount)
+  const generationPrice = generationPriceMicros / 1000000
+  const availableBalanceMicros = Math.max(0, (platformUser?.quota || 0) - (platformUser?.reserved_quota || 0))
+  const showGenerationPrice = isPlatformModeEnabled() && appMode !== 'agent'
+  const balanceInsufficient = Boolean(showGenerationPrice && platformUser && availableBalanceMicros < generationPriceMicros)
+  const generationPriceText = showGenerationPrice
+    ? balanceInsufficient
+      ? `余额不足，本次需要 ${formatPlatformPrice(generationPrice, platformStatus)}，请先充值`
+      : `本次生成将扣除 ${formatPlatformPrice(generationPrice, platformStatus)}`
+    : ''
+  const canSubmit = Boolean(prompt.trim() && hasSubmitApiConfig && !activeAgentIsRunning && !balanceInsufficient)
   const submitButtonAriaLabel = activeAgentIsRunning
     ? '停止生成'
+    : balanceInsufficient
+    ? '余额不足，请先充值'
     : hasSubmitApiConfig
     ? maskDraft ? '遮罩编辑' : '生成图像'
     : '请先配置 API'
-  const submitTooltipText = activeAgentIsRunning ? '停止生成' : '尚未完成 API 配置，请在右上角设置中进行'
+  const submitTooltipText = activeAgentIsRunning
+    ? '停止生成'
+    : balanceInsufficient
+    ? generationPriceText
+    : '尚未完成 API 配置，请在右上角设置中进行'
   const promptPlaceholder = '描述你想生成的图片，可输入 @ 来指定参考图...'
   const submitCurrentMode = useCallback(() => {
     if (appMode === 'agent') {
@@ -2171,6 +2191,11 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
             <div className="hidden min-w-0 flex-1 items-end justify-between gap-4 sm:flex lg:gap-3 xl:gap-4">
               {renderParams('grid-cols-6')}
 
+              {generationPriceText && (
+                <p className={`mb-3 max-w-44 text-right text-[11px] leading-4 ${balanceInsufficient ? 'text-red-500' : 'text-ink-3'}`}>
+                  {generationPriceText}
+                </p>
+              )}
               <div className="flex gap-2.5 flex-shrink-0 mb-0.5">
                 <div
                   className="relative"
@@ -2198,7 +2223,7 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
                   onMouseEnter={() => setSubmitHover(true)}
                   onMouseLeave={() => setSubmitHover(false)}
                 >
-                  <ButtonTooltip visible={(activeAgentIsRunning || !hasSubmitApiConfig) && submitHover} text={submitTooltipText} />
+                  <ButtonTooltip visible={(activeAgentIsRunning || balanceInsufficient || !hasSubmitApiConfig) && submitHover} text={submitTooltipText} />
                   <button
                     onClick={() => activeAgentIsRunning ? stopActiveAgentResponse() : hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
                     disabled={activeAgentIsRunning ? false : hasSubmitApiConfig ? !canSubmit : false}
@@ -2234,6 +2259,11 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
                 </div>
               </div>
 
+              {generationPriceText && (
+                <p className={`px-1 text-xs leading-4 ${balanceInsufficient ? 'text-red-500' : 'text-ink-3'}`}>
+                  {generationPriceText}
+                </p>
+              )}
               <div className="flex items-center gap-2">
                 <div
                   className="relative"
@@ -2298,7 +2328,7 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
                   onMouseEnter={() => setSubmitHover(true)}
                   onMouseLeave={() => setSubmitHover(false)}
                 >
-                  <ButtonTooltip visible={(activeAgentIsRunning || !hasSubmitApiConfig) && submitHover} text={submitTooltipText} />
+                  <ButtonTooltip visible={(activeAgentIsRunning || balanceInsufficient || !hasSubmitApiConfig) && submitHover} text={submitTooltipText} />
                   <button
                     onClick={() => activeAgentIsRunning ? stopActiveAgentResponse() : hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
                     disabled={activeAgentIsRunning ? false : hasSubmitApiConfig ? !canSubmit : false}

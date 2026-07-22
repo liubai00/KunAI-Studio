@@ -1,11 +1,9 @@
-import { Check, CircleDollarSign, Coins, Crown, LoaderCircle, Search, Shield, UserRoundCheck, UserRoundX, X } from 'lucide-react'
+import { Check, CircleDollarSign, LoaderCircle, Search, Shield, UserRoundCheck, UserRoundX, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, RefObject } from 'react'
 import { formatPlatformQuota } from '../../lib/platformCurrency'
 import { usePlatformStore } from '../../platformStore'
 import type { PlatformUser } from '../../platformStore'
-
-type GrantMode = 'membership' | 'credits'
 
 interface AdminUsersModalProps {
   onClose: () => void
@@ -19,8 +17,6 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
   const listUsers = usePlatformStore((s) => s.listUsers)
   const updateUserAccess = usePlatformStore((s) => s.updateUserAccess)
   const adjustUserBalance = usePlatformStore((s) => s.adjustUserBalance)
-  const grantUserMembership = usePlatformStore((s) => s.grantUserMembership)
-  const grantUserCredits = usePlatformStore((s) => s.grantUserCredits)
   const refreshSession = usePlatformStore((s) => s.refreshSession)
   const dialogRef = useRef<HTMLElement>(null)
   const [users, setUsers] = useState<PlatformUser[]>([])
@@ -31,10 +27,6 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
   const [balanceTarget, setBalanceTarget] = useState<PlatformUser | null>(null)
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
-  const [grantTarget, setGrantTarget] = useState<PlatformUser | null>(null)
-  const [grantMode, setGrantMode] = useState<GrantMode>('membership')
-  const [grantValue, setGrantValue] = useState('')
-  const [grantNote, setGrantNote] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const load = async (query = search) => {
@@ -122,40 +114,7 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
     }
   }
 
-  const openBalance = (user: PlatformUser) => { setGrantTarget(null); setBalanceTarget(user); setAmount(''); setNote('') }
-  const openGrant = (user: PlatformUser, mode: GrantMode) => {
-    setBalanceTarget(null)
-    setGrantTarget(user)
-    setGrantMode(mode)
-    setGrantValue('')
-    setGrantNote('')
-  }
-
-  const submitGrant = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!grantTarget) return
-    setError(null)
-    const value = Number(grantValue)
-    if (!Number.isFinite(value) || value === 0) {
-      setError(grantMode === 'membership' ? '请输入有效的天数（正整数）' : '请输入有效的次数')
-      return
-    }
-    setSavingId(grantTarget.id)
-    try {
-      const updated = grantMode === 'membership'
-        ? await grantUserMembership(grantTarget.id, value, grantNote)
-        : await grantUserCredits(grantTarget.id, value, grantNote)
-      setUsers((items) => items.map((item) => item.id === updated.id ? updated : item))
-      setGrantTarget(null)
-      setGrantValue('')
-      setGrantNote('')
-      await refreshSession().catch(() => undefined)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSavingId(null)
-    }
-  }
+  const openBalance = (user: PlatformUser) => { setBalanceTarget(user); setAmount(''); setNote('') }
 
   return (
     <div className={props.embedded ? 'kunai-embedded-modal' : 'fixed inset-0 z-[95] flex items-center justify-center bg-[rgba(5,8,24,0.72)] p-3 backdrop-blur-sm animate-overlay-in'} onMouseDown={(event) => !props.embedded && event.target === event.currentTarget && props.onClose()}>
@@ -181,7 +140,7 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
         {error && <p role="alert" className="mx-5 mt-3 shrink-0 rounded-[11px] border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500 sm:mx-6">{error}</p>}
 
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[920px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[780px] border-collapse text-left text-sm">
             <thead className="sticky top-0 z-10 bg-surface2 text-xs font-medium text-ink-3">
               <tr>
                 <th className="px-6 py-3">账户</th>
@@ -189,7 +148,6 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
                 <th className="px-3 py-3">角色</th>
                 <th className="px-3 py-3">状态</th>
                 <th className="px-3 py-3">可用余额</th>
-                <th className="px-3 py-3">会员 / 次数</th>
                 <th className="px-6 py-3 text-right">操作</th>
               </tr>
             </thead>
@@ -227,24 +185,8 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
                     </button>
                   </td>
                   <td className="px-3 py-3 font-mono text-xs font-semibold text-ink">{formatPlatformQuota(Math.max(0, user.quota - (user.reserved_quota || 0)), status)}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex flex-col gap-1">
-                      <span className={`inline-flex w-fit items-center gap-1 text-xs ${user.membership_active ? 'font-medium text-accent-ink' : 'text-ink-3'}`}>
-                        <Crown className="h-3 w-3" />{user.membership_active && user.membership_expires_at ? new Date(user.membership_expires_at).toLocaleDateString('zh-CN') : '非会员'}
-                      </span>
-                      <span className="inline-flex w-fit items-center gap-1 font-mono text-xs text-ink-2">
-                        <Coins className="h-3 w-3 text-ink-3" />{user.available_credits ?? Math.max(0, (user.image_credits ?? 0) - (user.reserved_credits ?? 0))} 次
-                      </span>
-                    </div>
-                  </td>
                   <td className="px-6 py-3 text-right">
                     <div className="inline-flex items-center gap-1">
-                      <button type="button" disabled={savingId === user.id} onClick={() => openGrant(user, 'membership')} className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] text-accent-ink transition-colors hover:bg-accent-soft disabled:opacity-50" aria-label={`为 ${user.email} 开通会员`} title="开通会员">
-                        <Crown className="h-4 w-4" />
-                      </button>
-                      <button type="button" disabled={savingId === user.id} onClick={() => openGrant(user, 'credits')} className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] text-accent-ink transition-colors hover:bg-accent-soft disabled:opacity-50" aria-label={`为 ${user.email} 赠送次数`} title="赠送次数">
-                        <Coins className="h-4 w-4" />
-                      </button>
                       <button type="button" disabled={savingId === user.id} onClick={() => openBalance(user)} className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] text-accent-ink transition-colors hover:bg-accent-soft disabled:opacity-50" aria-label={`调整 ${user.email} 余额`} title="调整余额">
                         {savingId === user.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CircleDollarSign className="h-4 w-4" />}
                       </button>
@@ -265,7 +207,7 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
               <div className="mt-1 text-xs text-ink-3">当前 {formatPlatformQuota(Math.max(0, balanceTarget.quota - (balanceTarget.reserved_quota || 0)), status)}</div>
             </div>
             <label className="space-y-1">
-              <span className="text-xs text-ink-3">调整对话余额（人民币）</span>
+              <span className="text-xs text-ink-3">调整账户余额（人民币）</span>
               <input required value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="10 或 -5" inputMode="decimal" className="h-9 w-full rounded-[11px] border border-line bg-surface px-3 font-mono text-sm text-ink outline-none transition focus:border-accent focus:ring-[3px] focus:ring-accent-soft placeholder:text-ink-3" />
             </label>
             <label className="space-y-1">
@@ -275,31 +217,6 @@ export default function AdminUsersModal(props: AdminUsersModalProps) {
             <div className="flex gap-2">
               <button type="button" onClick={() => setBalanceTarget(null)} className="h-9 rounded-[11px] border border-line bg-surface px-3 text-sm text-ink transition-colors hover:border-line2">取消</button>
               <button type="submit" disabled={savingId === balanceTarget.id} className="h-9 rounded-[11px] bg-[linear-gradient(150deg,var(--accent),#e07a1f)] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition-transform hover:-translate-y-px disabled:opacity-50">确认</button>
-            </div>
-          </form>
-        )}
-
-        {grantTarget && (
-          <form onSubmit={submitGrant} className="grid shrink-0 gap-3 border-t border-line bg-surface2 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_160px_minmax(0,1fr)_auto] sm:items-end sm:px-6">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-ink">{grantTarget.email}</div>
-              <div className="mt-1 flex items-center gap-1 text-xs text-ink-3">
-                {grantMode === 'membership'
-                  ? <><Crown className="h-3 w-3" />{grantTarget.membership_active && grantTarget.membership_expires_at ? `会员至 ${new Date(grantTarget.membership_expires_at).toLocaleDateString('zh-CN')}` : '当前非会员'}</>
-                  : <><Coins className="h-3 w-3" />{`当前 ${grantTarget.available_credits ?? Math.max(0, (grantTarget.image_credits ?? 0) - (grantTarget.reserved_credits ?? 0))} 次`}</>}
-              </div>
-            </div>
-            <label className="space-y-1">
-              <span className="text-xs text-ink-3">{grantMode === 'membership' ? '增加天数' : '增加次数（可负）'}</span>
-              <input required value={grantValue} onChange={(event) => setGrantValue(event.target.value)} placeholder={grantMode === 'membership' ? '30' : '100 或 -10'} inputMode="numeric" className="h-9 w-full rounded-[11px] border border-line bg-surface px-3 font-mono text-sm text-ink outline-none transition focus:border-accent focus:ring-[3px] focus:ring-accent-soft placeholder:text-ink-3" />
-            </label>
-            <label className="space-y-1">
-              <span className="text-xs text-ink-3">备注</span>
-              <input value={grantNote} onChange={(event) => setGrantNote(event.target.value)} placeholder={grantMode === 'membership' ? '开通/续费会员' : '赠送或修正次数'} className="h-9 w-full rounded-[11px] border border-line bg-surface px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-[3px] focus:ring-accent-soft placeholder:text-ink-3" />
-            </label>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setGrantTarget(null)} className="h-9 rounded-[11px] border border-line bg-surface px-3 text-sm text-ink transition-colors hover:border-line2">取消</button>
-              <button type="submit" disabled={savingId === grantTarget.id} className="h-9 rounded-[11px] bg-[linear-gradient(150deg,var(--accent),#e07a1f)] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition-transform hover:-translate-y-px disabled:opacity-50">确认</button>
             </div>
           </form>
         )}

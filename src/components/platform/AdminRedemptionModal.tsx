@@ -47,8 +47,6 @@ export default function AdminRedemptionModal(props: AdminRedemptionModalProps) {
   const [copied, setCopied] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
-  const [credits, setCredits] = useState('')
-  const [membershipDays, setMembershipDays] = useState('')
   const [balance, setBalance] = useState('')
   const [count, setCount] = useState('1')
   const [maxRedemptions, setMaxRedemptions] = useState('1')
@@ -119,8 +117,6 @@ export default function AdminRedemptionModal(props: AdminRedemptionModalProps) {
     setError(null)
     try {
       const result = await createRedemptionCodes({
-        credits: Number(credits) || 0,
-        membership_days: Number(membershipDays) || 0,
         balance: balance.trim() || undefined,
         count: Number(count) || 1,
         max_redemptions: Number(maxRedemptions) || 1,
@@ -166,11 +162,9 @@ export default function AdminRedemptionModal(props: AdminRedemptionModalProps) {
 
         <div className="min-h-0 flex-1 overflow-auto px-5 py-4 sm:px-6">
           <form onSubmit={submit} className="rounded-2xl border border-line bg-surface2 p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div className="text-sm font-semibold text-ink">创建兑换码</div><span className="text-xs text-ink-3">可组合发放次数、余额及历史会员权益</span></div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div className="text-sm font-semibold text-ink">创建兑换码</div><span className="text-xs text-ink-3">兑换后直接增加账户余额</span></div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="space-y-1"><span className="text-xs text-ink-3">生图次数</span><input value={credits} onChange={(event) => setCredits(event.target.value)} placeholder="如 100" inputMode="numeric" className={field} /></label>
-              <label className="space-y-1"><span className="text-xs text-ink-3">对话余额（人民币）</span><input value={balance} onChange={(event) => setBalance(event.target.value)} placeholder="如 20" inputMode="decimal" className={field} /></label>
-              <label className="space-y-1"><span className="text-xs text-ink-3">历史兼容会员天数</span><input value={membershipDays} onChange={(event) => setMembershipDays(event.target.value)} placeholder="默认不发放" inputMode="numeric" className={field} /></label>
+              <label className="space-y-1"><span className="text-xs text-ink-3">账户余额（人民币）</span><input required value={balance} onChange={(event) => setBalance(event.target.value)} placeholder="如 20" inputMode="decimal" className={field} /></label>
               <label className="space-y-1"><span className="text-xs text-ink-3">批量生成数量</span><input required value={count} onChange={(event) => setCount(event.target.value)} placeholder="1–1000" inputMode="numeric" className={field} /></label>
               <label className="space-y-1"><span className="text-xs text-ink-3">每码可使用次数</span><input required value={maxRedemptions} onChange={(event) => setMaxRedemptions(event.target.value)} placeholder="默认 1" inputMode="numeric" className={field} /></label>
               <label className="space-y-1"><span className="text-xs text-ink-3">有效期（天）</span><input value={expiresDays} onChange={(event) => setExpiresDays(event.target.value)} placeholder="留空永久" inputMode="numeric" className={field} /></label>
