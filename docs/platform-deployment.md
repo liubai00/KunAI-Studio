@@ -39,6 +39,9 @@ PLATFORM_ADMIN_EMAILS=admin@example.com
 IMAGE_UPSTREAM_BASE_URL=https://relay.example.com/v1
 IMAGE_UPSTREAM_API_KEY=
 PLATFORM_IMAGE_MODEL=gpt-image-2
+PLATFORM_IMAGE_MODEL_1K=gpt-image-2
+PLATFORM_IMAGE_MODEL_2K=gpt-image-2-2k
+PLATFORM_IMAGE_MODEL_4K=gpt-image-2-4k
 
 AGENT_UPSTREAM_BASE_URL=https://agent-relay.example.com/v1
 AGENT_UPSTREAM_API_KEY=
@@ -64,7 +67,7 @@ PLATFORM_SEARCH_ROUND_LIMIT=12
 
 `IMAGE_UPSTREAM_API_KEY`、`AGENT_UPSTREAM_API_KEY` 和 `TAVILY_API_KEY` 都只由 Node 服务读取，不得使用 `VITE_*` 变量，也不会写入浏览器、SQLite 或响应日志。文档示例故意将密钥留空；请通过部署环境或 Secret Manager 注入，禁止提交到仓库。
 
-中转按分辨率提供不同模型时，可配置 `PLATFORM_IMAGE_MODEL_1K`、`PLATFORM_IMAGE_MODEL_2K` 和 `PLATFORM_IMAGE_MODEL_4K`。服务端根据请求尺寸的总像素自动选择对应档位，并继续忽略浏览器传入的模型名；未配置的档位会向下回退，最终使用 `PLATFORM_IMAGE_MODEL`。成功响应还会核验实际图片宽高至少达到请求宽高的 90%，并限制宽高比偏差不超过 12%；低档图片冒充 2K/4K 时任务失败并释放预留次数，不会扣费。
+当前图片中转使用 `gpt-image-2`、`gpt-image-2-2k` 和 `gpt-image-2-4k` 分别承载页面的 1K、2K、4K 档位。服务端根据请求尺寸的总像素自动选择对应模型，并继续忽略浏览器传入的模型名；供应商模型变化时可通过 `PLATFORM_IMAGE_MODEL_1K`、`PLATFORM_IMAGE_MODEL_2K` 和 `PLATFORM_IMAGE_MODEL_4K` 调整，未配置的档位会向下回退，最终使用 `PLATFORM_IMAGE_MODEL`。成功响应还会核验实际图片宽高至少达到请求宽高的 90%，并限制宽高比偏差不超过 12%；低档图片冒充 2K/4K 时任务失败并释放预留额度，不会扣费。
 
 ## Agent 模型目录与 token 计费
 
