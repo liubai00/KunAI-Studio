@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getRechargeValidationError, isValidRechargeAmount } from './platformRecharge'
+import { getDefaultPaymentType, getRechargeValidationError, isValidRechargeAmount } from './platformRecharge'
 
 describe('platform recharge validation', () => {
   it('accepts only in-range amounts with at most two decimal places', () => {
@@ -13,5 +13,11 @@ describe('platform recharge validation', () => {
     expect(getRechargeValidationError({ paymentEnabled: false, amount: '20', min: 1, max: 5000, requiresPaymentType: true, payType: null })).toBe('支付服务暂不可用')
     expect(getRechargeValidationError({ paymentEnabled: true, amount: '20', min: 1, max: 5000, requiresPaymentType: true, payType: null })).toBe('请选择微信支付或支付宝')
     expect(getRechargeValidationError({ paymentEnabled: true, amount: '20', min: 1, max: 5000, requiresPaymentType: true, payType: 'alipay' })).toBeNull()
+  })
+
+  it('defaults to WeChat and falls back to the first available payment type', () => {
+    expect(getDefaultPaymentType(['alipay', 'wxpay'])).toBe('wxpay')
+    expect(getDefaultPaymentType(['alipay'])).toBe('alipay')
+    expect(getDefaultPaymentType([])).toBeNull()
   })
 })

@@ -119,10 +119,10 @@ test('image relay selects the managed model for each resolution tier', async () 
 })
 
 test('image billing selects the configured price for each resolution tier', () => {
-  const prices = { '1k': 150000, '2k': 200000, '4k': 500000 }
+  const prices = { '1k': 150000, '2k': 200000, '4k': 350000 }
   assert.equal(getImagePriceMicrosForTier('1k', prices), 150000)
   assert.equal(getImagePriceMicrosForTier('2k', prices), 200000)
-  assert.equal(getImagePriceMicrosForTier('4k', prices), 500000)
+  assert.equal(getImagePriceMicrosForTier('4k', prices), 350000)
   assert.equal(getImagePriceMicrosForTier('unknown', prices, 70000), 70000)
 })
 

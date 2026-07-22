@@ -14,6 +14,11 @@ export function isValidRechargeAmount(amount: string, min: number, max: number) 
   return Number.isFinite(value) && value >= min && value <= max && /^\d+(?:\.\d{1,2})?$/.test(amount.trim())
 }
 
+export function getDefaultPaymentType(paymentTypes: PlatformPaymentType[]) {
+  if (paymentTypes.includes('wxpay')) return 'wxpay'
+  return paymentTypes[0] ?? null
+}
+
 export function getRechargeValidationError(options: RechargeValidationOptions) {
   if (!options.paymentEnabled) return '支付服务暂不可用'
   if (!isValidRechargeAmount(options.amount, options.min, options.max)) {

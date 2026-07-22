@@ -7,7 +7,7 @@ import {
 } from './platformPricing.mjs'
 
 test('uses the configured image prices for each resolution tier', () => {
-  assert.deepEqual(DEFAULT_IMAGE_PRICES_CNY, { '1k': 0.15, '2k': 0.2, '4k': 0.5 })
+  assert.deepEqual(DEFAULT_IMAGE_PRICES_CNY, { '1k': 0.15, '2k': 0.2, '4k': 0.35 })
 })
 
 test('converts the fixed Agent price catalog to CNY micros', () => {

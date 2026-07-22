@@ -1,4 +1,4 @@
-import { Bell, Bot, Database, ExternalLink, MonitorCog, Moon, SlidersHorizontal, Sparkles, Sun } from 'lucide-react'
+import { Bell, Bot, Database, MonitorCog, Moon, SlidersHorizontal, Sparkles, Sun } from 'lucide-react'
 import { toggleTheme, useResolvedTheme } from '../../lib/theme'
 import { useStore } from '../../store'
 
@@ -20,13 +20,13 @@ export default function SettingsWorkspace() {
       <div data-settings-grid className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
         <button type="button" onClick={toggleTheme} className="kunai-settings-card text-left">
           <span className="kunai-settings-icon">{resolvedTheme === 'dark' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}</span>
-          <div className="min-w-0 flex-1"><h3>星空主题</h3><p>当前为{resolvedTheme === 'dark' ? '深空' : '晨星'}模式，点击切换显示风格</p></div><ExternalLink className="h-4 w-4 text-ink-3" />
+          <div className="min-w-0 flex-1"><h3>星空主题</h3><p>当前为{resolvedTheme === 'dark' ? '深空' : '晨星'}模式，点击切换显示风格</p></div>
         </button>
         {groups.map((group) => {
           const Icon = group.icon
-          return <button key={group.title} type="button" onClick={() => setShowSettings(true, group.tab)} className="kunai-settings-card text-left"><span className="kunai-settings-icon"><Icon className="h-5 w-5" /></span><div className="min-w-0 flex-1"><h3>{group.title}</h3><p>{group.text}</p></div><ExternalLink className="h-4 w-4 text-ink-3" /></button>
+          return <button key={group.title} type="button" onClick={() => setShowSettings(true, group.tab)} className="kunai-settings-card text-left"><span className="kunai-settings-icon"><Icon className="h-5 w-5" /></span><div className="min-w-0 flex-1"><h3>{group.title}</h3><p>{group.text}</p></div></button>
         })}
-        <button type="button" onClick={() => setShowSettings(true, 'data')} className="kunai-settings-card text-left"><span className="kunai-settings-icon"><Bell className="h-5 w-5" /></span><div className="min-w-0 flex-1"><h3>安全与隐私</h3><p>配置与创作记录保存在当前账户空间；敏感凭据不会显示在页面中。</p></div><ExternalLink className="h-4 w-4 shrink-0 text-ink-3" /></button>
+        <button type="button" onClick={() => setShowSettings(true, 'data')} className="kunai-settings-card text-left"><span className="kunai-settings-icon"><Bell className="h-5 w-5" /></span><div className="min-w-0 flex-1"><h3>安全与隐私</h3><p>配置与创作记录保存在当前账户空间；敏感凭据不会显示在页面中。</p></div></button>
       </div>
     </main>
   )

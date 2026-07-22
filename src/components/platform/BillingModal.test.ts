@@ -10,6 +10,7 @@ describe('billing page structure', () => {
     expect(source).toContain('<PaymentQrModal embedded')
     expect(source).toContain("if (refresh) void handleRecharge('wxpay')")
     expect(source).toContain("if (refresh) void handleRecharge('alipay')")
+    expect(source).toContain('getDefaultPaymentType(status?.image_studio?.payment_types ?? [])')
   })
 
   it('shows tiered image and Agent model prices', () => {
@@ -17,5 +18,7 @@ describe('billing page structure', () => {
     expect(source).toContain('Agent 模型价格')
     expect(source).toContain('人民币 / 百万 tokens')
     expect(source).not.toContain('生图单价')
+    expect(source).not.toContain('1 USD =')
+    expect(source).toContain('formatPlatformLedgerAmount(entry.amount_micros, status)')
   })
 })

@@ -12,23 +12,37 @@ function formatNumber(value: number, minDigits: number, maxDigits: number) {
   }).format(value)
 }
 
+function normalizeDisplayZero(value: number, digits: number) {
+  return Math.abs(value) < 0.5 / (10 ** digits) ? 0 : value
+}
+
 export function formatPlatformQuota(quota: number, status: PlatformStatus | null, digits = 2) {
   const type = getDisplayType(status)
   if (type === 'TOKENS') return `${formatNumber(quota, 0, 0)} Tokens`
 
   const quotaPerUnit = status?.quota_per_unit || 500000
   const base = Number.isFinite(quota) && quotaPerUnit > 0 ? quota / quotaPerUnit : 0
-  if (type === 'CNY') return `¥${formatNumber(base, digits, digits)}`
+  if (type === 'CNY') return `¥${formatNumber(normalizeDisplayZero(base, digits), digits, digits)}`
   if (type === 'CUSTOM') {
     const rate = status?.custom_currency_exchange_rate || 1
-    return `${status?.custom_currency_symbol || '¤'}${formatNumber(base * rate, digits, digits)}`
+    return `${status?.custom_currency_symbol || '¤'}${formatNumber(normalizeDisplayZero(base * rate, digits), digits, digits)}`
   }
   return new Intl.NumberFormat('zh-CN', {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
-  }).format(base)
+  }).format(normalizeDisplayZero(base, digits))
+}
+
+export function formatPlatformLedgerAmount(quota: number, status: PlatformStatus | null) {
+  const type = getDisplayType(status)
+  const quotaPerUnit = status?.quota_per_unit || 500000
+  const base = Number.isFinite(quota) && quotaPerUnit > 0 ? quota / quotaPerUnit : 0
+  if (type === 'CNY' && quota !== 0 && Math.abs(base) < 0.01) {
+    return `${quota > 0 ? '+' : '-'}<¥0.01`
+  }
+  return `${quota > 0 ? '+' : ''}${formatPlatformQuota(quota, status)}`
 }
 
 export function formatPlatformPrice(price: number, status: PlatformStatus | null) {

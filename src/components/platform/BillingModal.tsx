@@ -4,8 +4,8 @@ import type { RefObject } from 'react'
 import { createPlatformBalanceCheckout } from '../../lib/platformCheckout'
 import type { PlatformPaymentType, PlatformProductCheckout } from '../../lib/platformCheckout'
 import { getComposerEnterAction } from '../../lib/composerKeyboard'
-import { formatPlatformPrice, formatPlatformQuota } from '../../lib/platformCurrency'
-import { getRechargeValidationError, isValidRechargeAmount } from '../../lib/platformRecharge'
+import { formatPlatformLedgerAmount, formatPlatformPrice, formatPlatformQuota } from '../../lib/platformCurrency'
+import { getDefaultPaymentType, getRechargeValidationError, isValidRechargeAmount } from '../../lib/platformRecharge'
 import { usePlatformStore } from '../../platformStore'
 import type { PlatformBilling } from '../../platformStore'
 import PaymentQrModal from './PaymentQrModal'
@@ -35,12 +35,17 @@ export default function BillingModal(props: BillingModalProps) {
   const [billingError, setBillingError] = useState<string | null>(null)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
   const [activeCheckout, setActiveCheckout] = useState<PlatformProductCheckout | null>(null)
-  const [payType, setPayType] = useState<PlatformPaymentType | null>(null)
+  const [payType, setPayType] = useState<PlatformPaymentType | null>(() => getDefaultPaymentType(status?.image_studio?.payment_types ?? []))
   const [rechargeAmount, setRechargeAmount] = useState('20')
   const [recharging, setRecharging] = useState(false)
   const [redeemInput, setRedeemInput] = useState('')
   const [redeeming, setRedeeming] = useState(false)
   const [redeemMsg, setRedeemMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const paymentTypes = billing?.payment_types ?? status?.image_studio?.payment_types ?? []
+
+  useEffect(() => {
+    setPayType((current) => current && paymentTypes.includes(current) ? current : getDefaultPaymentType(paymentTypes))
+  }, [paymentTypes])
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
@@ -88,7 +93,6 @@ export default function BillingModal(props: BillingModalProps) {
   const rechargeMin = billing?.recharge_min ?? status?.image_studio?.recharge_min ?? 1
   const rechargeMax = billing?.recharge_max ?? status?.image_studio?.recharge_max ?? 5000
   const rechargeValid = isValidRechargeAmount(rechargeAmount, rechargeMin, rechargeMax)
-  const paymentTypes = billing?.payment_types ?? status?.image_studio?.payment_types ?? []
   const requiresPaymentType = paymentProvider === 'dulupay'
   const rechargeError = getRechargeValidationError({
     paymentEnabled,
@@ -105,7 +109,6 @@ export default function BillingModal(props: BillingModalProps) {
     '4k': billing?.image_unit_price ?? status?.image_studio?.image_unit_price ?? 0,
   }
   const agentModelPrices = billing?.agent_model_prices ?? status?.image_studio?.agent_model_prices ?? []
-  const usdCnyRate = billing?.usd_cny_rate ?? status?.image_studio?.usd_cny_rate ?? 7.2
 
   const handleRecharge = async (selectedPayType = payType) => {
     const validationError = getRechargeValidationError({
@@ -248,9 +251,8 @@ export default function BillingModal(props: BillingModalProps) {
           </div>
 
           <details className="group rounded-2xl border border-line bg-surface2 p-4">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-ink">
+            <summary className="flex cursor-pointer list-none items-center gap-3 text-sm font-semibold text-ink">
               <span className="flex items-center gap-2"><Bot className="h-4 w-4 text-accent" />Agent 模型价格</span>
-              <span className="text-xs font-normal text-ink-3">1 USD = ¥{usdCnyRate.toFixed(2)}</span>
             </summary>
             <div className="mt-3 grid gap-2">
               {agentModelPrices.map((model) => (
@@ -300,9 +302,7 @@ export default function BillingModal(props: BillingModalProps) {
                       <div className="truncate font-medium text-ink-2">{entry.description}</div>
                       <div className="mt-0.5 text-xs text-ink-3">{new Date(entry.created_at).toLocaleString('zh-CN')}</div>
                     </div>
-                    <div className={`shrink-0 font-mono text-xs font-semibold ${entry.amount_micros > 0 ? 'text-emerald-500' : 'text-ink-2'}`}>
-                      {entry.amount_micros > 0 ? '+' : ''}{formatPlatformQuota(entry.amount_micros, status)}
-                    </div>
+                    <div className={`shrink-0 font-mono text-xs font-semibold ${entry.amount_micros > 0 ? 'text-emerald-500' : 'text-ink-2'}`}>{formatPlatformLedgerAmount(entry.amount_micros, status)}</div>
                   </div>
                 ))}
               </div>

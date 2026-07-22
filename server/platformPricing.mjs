@@ -3,7 +3,7 @@ export const DEFAULT_USD_CNY_RATE = 7.2
 export const DEFAULT_IMAGE_PRICES_CNY = Object.freeze({
   '1k': 0.15,
   '2k': 0.2,
-  '4k': 0.5,
+  '4k': 0.35,
 })
 
 export const AGENT_MODEL_USD_PRICES = Object.freeze([
