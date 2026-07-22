@@ -1,4 +1,4 @@
-import { Bell, Bot, Database, MonitorCog, Moon, SlidersHorizontal, Sparkles, Sun } from 'lucide-react'
+import { Bell, Bot, Database, Moon, SlidersHorizontal, Sparkles, Sun } from 'lucide-react'
 import { toggleTheme, useResolvedTheme } from '../../lib/theme'
 import { useStore } from '../../store'
 
@@ -11,7 +11,6 @@ export default function SettingsWorkspace() {
     { icon: SlidersHorizontal, title: '创作偏好', text: `回车提交 ${settings.enterSubmit ? '已开启' : '已关闭'} · 任务完成通知 ${settings.taskCompletionNotification ? '已开启' : '已关闭'}`, tab: 'general' as const },
     { icon: Bot, title: 'Agent 配置', text: `最多 ${settings.agentMaxToolRounds} 个工具回合 · 管理模型与联网能力`, tab: 'agent' as const },
     { icon: Database, title: '数据管理', text: '导入、导出或清理本地创作数据与配置', tab: 'data' as const },
-    { icon: MonitorCog, title: '关于 KunAI Studio', text: `当前版本 ${__APP_VERSION__} · 查看运行环境与更新信息`, tab: 'about' as const },
   ]
 
   return (

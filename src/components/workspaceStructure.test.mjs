@@ -32,12 +32,12 @@ describe('workspace UI structure', () => {
     expect(`${inputBar}\n${workspace}`).not.toMatch(/searchPrice|search_price|联网搜索.*¥/)
   })
 
-  it('shows the login and creation workspaces in the product introduction', () => {
+  it('does not expose the product introduction after hiding About', () => {
     const source = readSource('./SettingsModal.tsx')
 
-    expect(source).toContain('./examples/kunai-login-workspace.jpg')
-    expect(source).toContain('./examples/kunai-creation-workspace.jpg')
-    expect(source).toContain('产品界面预览')
+    expect(source).not.toContain('./examples/kunai-login-workspace.jpg')
+    expect(source).not.toContain('./examples/kunai-creation-workspace.jpg')
+    expect(source).not.toContain('产品界面预览')
   })
 
   it('uses the KunAI brand mark as the browser icon', () => {
@@ -49,11 +49,14 @@ describe('workspace UI structure', () => {
     expect(favicon).toContain('id="kunai-favicon-core"')
   })
 
-  it('keeps the license disclosure in About instead of repeating it on login', () => {
+  it('keeps the license disclosure in repository notices instead of the product UI', () => {
     const auth = readSource('./auth/AuthScreen.tsx')
     const settings = readSource('./SettingsModal.tsx')
+    const notice = readSource('../../NOTICE')
 
     expect(auth).not.toContain('基于 GPT Image Playground（MIT）二次开发')
-    expect(settings).toContain('KunAI Studio 基于 GPT Image Playground 的 MIT 许可代码进行二次开发')
+    expect(settings).not.toContain('KunAI Studio 基于 GPT Image Playground 的 MIT 许可代码进行二次开发')
+    expect(notice).toContain('software derived from GPT Image Playground')
+    expect(notice).toContain('licensed under the MIT License')
   })
 })

@@ -10,4 +10,13 @@ describe('settings workspace cards', () => {
     expect(source).toContain("onClick={() => setShowSettings(true, 'data')}")
     expect(source).not.toContain('ExternalLink')
   })
+
+  it('does not expose the About workspace', () => {
+    const shellSource = readFileSync(new URL('./AppShell.tsx', import.meta.url), 'utf8')
+    const modalSource = readFileSync(new URL('../SettingsModal.tsx', import.meta.url), 'utf8')
+    expect(source).not.toContain('关于 KunAI Studio')
+    expect(shellSource).not.toContain("setShowSettings(true, 'about')")
+    expect(modalSource).not.toContain("setActiveTab('about')")
+    expect(modalSource).not.toContain("activeTab === 'about'")
+  })
 })

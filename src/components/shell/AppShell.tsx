@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Bot, ChevronLeft, ChevronRight, CircleHelp, Images, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Settings, ShieldCheck, Sparkles, Sun, Wallet, X } from 'lucide-react'
+import { Bot, ChevronLeft, ChevronRight, Images, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Settings, ShieldCheck, Sparkles, Sun, Wallet, X } from 'lucide-react'
 import { hasPlatformCapability, usePlatformStore } from '../../platformStore'
 import { toggleTheme, useResolvedTheme } from '../../lib/theme'
 import { formatPlatformQuota } from '../../lib/platformCurrency'
@@ -149,9 +149,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
             )}
             <button type="button" onClick={toggleTheme} className="kunai-icon-button" aria-label={resolvedTheme === 'dark' ? '切换浅色主题' : '切换深色主题'}>
               {resolvedTheme === 'dark' ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
-            </button>
-            <button type="button" className="kunai-icon-button !hidden sm:!inline-flex" aria-label="帮助中心" onClick={() => setShowSettings(true, 'about')}>
-              <CircleHelp className="h-[18px] w-[18px]" />
             </button>
             {user && (
               <div ref={accountRootRef} className="relative">

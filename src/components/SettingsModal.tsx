@@ -468,7 +468,8 @@ export default function SettingsModal() {
   }, [activeProfile.id, activeProfile.timeout])
 
   useEffect(() => {
-    if (showSettings && settingsTabRequest) setActiveTab(platformMode && settingsTabRequest === 'api' ? 'general' : settingsTabRequest)
+    if (!showSettings || !settingsTabRequest) return
+    setActiveTab(settingsTabRequest === 'about' || (platformMode && settingsTabRequest === 'api') ? 'general' : settingsTabRequest)
   }, [platformMode, settingsTabRequest, showSettings])
 
   const updateProfileMenuMaxHeight = useCallback(() => {
@@ -1227,15 +1228,6 @@ export default function SettingsModal() {
                 </svg>
                 数据管理
               </button>
-              <button
-                onClick={() => setActiveTab('about')}
-                className={`whitespace-nowrap shrink-0 flex items-center gap-2.5 px-3 py-[9px] rounded-[10px] text-[13.5px] transition-colors ${activeTab === 'about' ? 'bg-surface text-accent-ink font-semibold shadow-card' : 'font-medium text-ink-2 hover:bg-surface hover:text-ink'}`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                关于
-              </button>
           </nav>
         </div>
 
@@ -1869,99 +1861,6 @@ export default function SettingsModal() {
               </div>
             )}
 
-            {activeTab === 'about' && (
-              <div className="h-full min-h-[300px] overflow-y-auto px-5 py-7 custom-scrollbar sm:px-8">
-                <div className="mx-auto max-w-[760px]">
-                  <div className="flex flex-col items-center text-center">
-                    <BrandMark className="mb-5 h-[76px] w-[76px]" />
-                    <h4 className="text-[22px] font-bold text-ink">KunAI Studio</h4>
-                    <p className="mt-2 text-[13px] font-medium uppercase tracking-[0.18em] text-ink-3">Visual Intelligence</p>
-                    <p className="mt-5 max-w-[560px] text-[13px] leading-6 text-ink-2">
-                      面向创作者与团队的 AI 视觉创作及智能 Agent 工作台，将图像生成、参考图编辑、多轮对话、联网搜索、资产管理与商业计费汇聚在一个产品中。
-                    </p>
-                  </div>
-
-                  <div className="mt-7 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-line bg-surface2 p-4"><b className="text-sm text-ink">1K · 2K · 4K</b><p className="mt-1.5 text-xs leading-5 text-ink-3">多分辨率高质量图像创作</p></div>
-                    <div className="rounded-2xl border border-line bg-surface2 p-4"><b className="text-sm text-ink">Agent + Search</b><p className="mt-1.5 text-xs leading-5 text-ink-3">多轮上下文与独立联网搜索</p></div>
-                    <div className="rounded-2xl border border-line bg-surface2 p-4"><b className="text-sm text-ink">Enterprise Ready</b><p className="mt-1.5 text-xs leading-5 text-ink-3">账户、计费、支付和管理中心</p></div>
-                  </div>
-
-                  <section className="mt-8">
-                    <div className="mb-3 flex items-end justify-between gap-4">
-                      <div><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent-ink">Product experience</p><h5 className="mt-1 text-base font-semibold text-ink">产品界面预览</h5></div>
-                      <span className="text-xs text-ink-3">点击图片查看完整界面</span>
-                    </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <a href="./examples/kunai-login-workspace.jpg" target="_blank" rel="noopener noreferrer" className="group overflow-hidden rounded-[20px] border border-line bg-surface2 transition hover:-translate-y-0.5 hover:border-line2 hover:shadow-card">
-                        <img src="./examples/kunai-login-workspace.jpg" alt="KunAI Studio 品牌登录工作台" loading="lazy" className="aspect-[16/9] w-full object-cover" />
-                        <span className="block px-4 py-3 text-sm font-semibold text-ink">品牌登录工作台</span>
-                      </a>
-                      <a href="./examples/kunai-creation-workspace.jpg" target="_blank" rel="noopener noreferrer" className="group overflow-hidden rounded-[20px] border border-line bg-surface2 transition hover:-translate-y-0.5 hover:border-line2 hover:shadow-card">
-                        <img src="./examples/kunai-creation-workspace.jpg" alt="KunAI Studio 星图创作工作区" loading="lazy" className="aspect-[16/9] w-full object-cover" />
-                        <span className="block px-4 py-3 text-sm font-semibold text-ink">星图创作工作区</span>
-                      </a>
-                    </div>
-                  </section>
-
-                  <section className="mt-8">
-                    <div className="mb-3 flex items-end justify-between gap-4">
-                      <div><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent-ink">Creation showcase</p><h5 className="mt-1 text-base font-semibold text-ink">创作示例</h5></div>
-                      <span className="text-xs text-ink-3">更多案例持续更新</span>
-                    </div>
-                    <figure className="overflow-hidden rounded-[20px] border border-line bg-surface2">
-                      <img src="./examples/beach-portrait.png" alt="KunAI Studio 海岛人像创作示例" className="aspect-[16/9] w-full object-cover object-[center_43%]" />
-                      <figcaption className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                        <span className="text-sm font-semibold text-ink">海岛光影 · 写真人像</span>
-                        <span className="text-xs text-ink-3">示例仅作能力展示，商用前请确认素材与肖像授权</span>
-                      </figcaption>
-                    </figure>
-                  </section>
-
-                  <section className="mt-8 rounded-[20px] border border-line bg-surface2 p-5">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent-ink">Foundation & evolution</p>
-                    <h5 className="mt-2 text-base font-semibold text-ink">基于开放基础，发展为完整商业平台</h5>
-                    <p className="mt-3 text-[12.5px] leading-6 text-ink-2">
-                      KunAI Studio 基于 GPT Image Playground 的 MIT 许可代码进行二次开发。在其图像创作基础上，我们新增并持续维护品牌系统、平台账户、人民币计费、Dulupay 支付、多轮 Agent、Tavily 搜索、企业管理、生产部署与安全增强能力。
-                    </p>
-                    <p className="mt-3 text-xs leading-5 text-ink-3">当前版本 v{__APP_VERSION__} · 原项目版权与所有生产依赖许可均保留在第三方许可清单中。</p>
-                    <a href="https://github.com/liubai00/KunAI-Studio" target="_blank" rel="noopener noreferrer" className="mt-3 block break-all font-mono text-xs text-accent-ink hover:underline">github.com/liubai00/KunAI-Studio</a>
-                  </section>
-
-                  <div className="mt-6 flex flex-wrap items-center justify-center gap-3 pb-3">
-                  <a
-                    href="https://github.com/liubai00/KunAI-Studio"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-accent/30 bg-accent-soft px-5 py-2.5 text-[13px] font-semibold text-accent-ink transition hover:border-accent/60"
-                  >
-                    <LinkIcon className="h-4 w-4 opacity-70" />
-                    查看 GitHub
-                  </a>
-                  <a
-                    href="https://github.com/liubai00/KunAI-Studio/issues"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-line bg-surface2 px-5 py-2.5 text-[13px] font-semibold text-ink transition hover:border-line2"
-                  >
-                    <svg className="h-4 w-4 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                    </svg>
-                    反馈问题
-                  </a>
-                  <a
-                    href="./third-party-notices.txt"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-line bg-surface2 px-5 py-2.5 text-[13px] font-semibold text-ink transition hover:border-line2"
-                  >
-                    <LinkIcon className="h-4 w-4 opacity-70" />
-                    第三方许可
-                  </a>
-                  </div>
-                </div>
-              </div>
-            )}
             </div>
           </div>
         </div>
