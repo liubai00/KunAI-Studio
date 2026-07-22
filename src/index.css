@@ -707,7 +707,9 @@ body {
 
 /* Parameter / tag chips (JetBrains Mono) */
 .kunai-ui-chip {
-  display: inline-block;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
   font: 500 11.5px/1.35 var(--font-mono);
   padding: 3px 8px;
   border-radius: 7px;
