@@ -1,9 +1,11 @@
-import { Image, LoaderCircle, ScanLine, Ticket, Wallet, X } from 'lucide-react'
+import { Bot, Image, LoaderCircle, ScanLine, Ticket, Wallet, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { createPlatformBalanceCheckout } from '../../lib/platformCheckout'
 import type { PlatformPaymentType, PlatformProductCheckout } from '../../lib/platformCheckout'
+import { getComposerEnterAction } from '../../lib/composerKeyboard'
 import { formatPlatformPrice, formatPlatformQuota } from '../../lib/platformCurrency'
+import { getRechargeValidationError, isValidRechargeAmount } from '../../lib/platformRecharge'
 import { usePlatformStore } from '../../platformStore'
 import type { PlatformBilling } from '../../platformStore'
 import PaymentQrModal from './PaymentQrModal'
@@ -14,6 +16,12 @@ interface BillingModalProps {
   embedded?: boolean
 }
 
+const IMAGE_PRICE_TIERS = [
+  { key: '1k' as const, label: '1K' },
+  { key: '2k' as const, label: '2K' },
+  { key: '4k' as const, label: '4K' },
+]
+
 export default function BillingModal(props: BillingModalProps) {
   const user = usePlatformStore((s) => s.user)
   const status = usePlatformStore((s) => s.status)
@@ -22,13 +30,12 @@ export default function BillingModal(props: BillingModalProps) {
   const redeemCode = usePlatformStore((s) => s.redeemCode)
   const paymentEnabled = Boolean(status?.image_studio?.payment_enabled ?? status?.image_studio?.payment_url)
   const paymentProvider = status?.image_studio?.payment_provider
-  const imageUnitPrice = status?.image_studio?.image_unit_price || 0
   const dialogRef = useRef<HTMLElement>(null)
   const [billing, setBilling] = useState<PlatformBilling | null>(null)
   const [billingError, setBillingError] = useState<string | null>(null)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
-  const [activeCheckout, setActiveCheckout] = useState<{ checkout: PlatformProductCheckout; productName: string } | null>(null)
-  const [payType, setPayType] = useState<PlatformPaymentType>('wxpay')
+  const [activeCheckout, setActiveCheckout] = useState<PlatformProductCheckout | null>(null)
+  const [payType, setPayType] = useState<PlatformPaymentType | null>(null)
   const [rechargeAmount, setRechargeAmount] = useState('20')
   const [recharging, setRecharging] = useState(false)
   const [redeemInput, setRedeemInput] = useState('')
@@ -80,20 +87,50 @@ export default function BillingModal(props: BillingModalProps) {
   const account = billing || user
   const rechargeMin = billing?.recharge_min ?? status?.image_studio?.recharge_min ?? 1
   const rechargeMax = billing?.recharge_max ?? status?.image_studio?.recharge_max ?? 5000
-  const rechargeValue = Number(rechargeAmount)
-  const rechargeValid = Number.isFinite(rechargeValue) && rechargeValue >= rechargeMin && rechargeValue <= rechargeMax && /^\d+(?:\.\d{1,2})?$/.test(rechargeAmount.trim())
+  const rechargeValid = isValidRechargeAmount(rechargeAmount, rechargeMin, rechargeMax)
+  const paymentTypes = billing?.payment_types ?? status?.image_studio?.payment_types ?? []
+  const requiresPaymentType = paymentProvider === 'dulupay'
+  const rechargeError = getRechargeValidationError({
+    paymentEnabled,
+    amount: rechargeAmount,
+    min: rechargeMin,
+    max: rechargeMax,
+    requiresPaymentType,
+    payType,
+  })
+  const rechargeReady = rechargeError === null
+  const imagePrices = billing?.image_prices ?? status?.image_studio?.image_prices ?? {
+    '1k': billing?.image_unit_price ?? status?.image_studio?.image_unit_price ?? 0,
+    '2k': billing?.image_unit_price ?? status?.image_studio?.image_unit_price ?? 0,
+    '4k': billing?.image_unit_price ?? status?.image_studio?.image_unit_price ?? 0,
+  }
+  const agentModelPrices = billing?.agent_model_prices ?? status?.image_studio?.agent_model_prices ?? []
+  const usdCnyRate = billing?.usd_cny_rate ?? status?.image_studio?.usd_cny_rate ?? 7.2
 
-  const handleRecharge = async () => {
-    if (!paymentEnabled || !rechargeValid || recharging) return
+  const handleRecharge = async (selectedPayType = payType) => {
+    const validationError = getRechargeValidationError({
+      paymentEnabled,
+      amount: rechargeAmount,
+      min: rechargeMin,
+      max: rechargeMax,
+      requiresPaymentType,
+      payType: selectedPayType,
+    })
+    if (validationError) {
+      setCheckoutError(validationError)
+      return
+    }
+    if (recharging) return
     setRecharging(true)
     setCheckoutError(null)
+    setActiveCheckout(null)
     try {
-      const checkout = await createPlatformBalanceCheckout(rechargeAmount.trim(), payType)
+      const checkout = await createPlatformBalanceCheckout(rechargeAmount.trim(), selectedPayType || 'wxpay')
       if (checkout.payment_display === 'redirect' && checkout.checkout_url) {
         window.location.assign(checkout.checkout_url)
         return
       }
-      setActiveCheckout({ checkout, productName: '账户余额充值' })
+      setActiveCheckout(checkout)
       setRecharging(false)
     } catch (err) {
       setCheckoutError(err instanceof Error ? err.message : String(err))
@@ -152,54 +189,84 @@ export default function BillingModal(props: BillingModalProps) {
               <p className="mt-1 text-xs leading-5 text-ink-3">余额和历史账单仍可正常查看；充值入口将在管理员完成 Dulupay 配置后开放。</p>
             </div>
           )}
-          <div className="grid grid-cols-2 gap-3">
-            <div id="billing-description" className="min-w-0 rounded-2xl border border-line bg-surface2 p-4">
-              <div className="flex items-center gap-2 text-xs font-medium text-ink-3"><Wallet className="h-4 w-4 text-info" />可用余额</div>
-              <div className="mt-2 break-words font-mono text-lg font-semibold text-ink sm:text-xl">{formatPlatformQuota(Math.max(0, account.quota - (account.reserved_quota || 0)), status)}</div>
-              <div className="mt-0.5 text-[11px] text-ink-3">用于生图、Agent 对话与联网搜索 · 累计消费 {formatPlatformQuota(account.used_quota, status)}</div>
+          <section id="billing-description" className="rounded-2xl border border-line bg-surface2 p-4">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-5">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-xs font-medium text-ink-3"><Wallet className="h-4 w-4 text-info" />可用余额</div>
+                <div className="mt-2 break-words font-mono text-lg font-semibold text-ink sm:text-xl">{formatPlatformQuota(Math.max(0, account.quota - (account.reserved_quota || 0)), status)}</div>
+                <div className="mt-0.5 text-[11px] text-ink-3">用于生图、Agent 对话与联网搜索 · 累计消费 {formatPlatformQuota(account.used_quota, status)}</div>
+              </div>
+              <div className="min-w-0 border-t border-line pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-ink">账户余额充值</div>
+                    <div className="mt-0.5 text-xs text-ink-3">单次充值 ¥{rechargeMin.toFixed(2)}–¥{rechargeMax.toFixed(2)}</div>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  {paymentEnabled ? (
+                    <>
+                      <label className="flex h-10 min-w-0 flex-1 items-center rounded-[11px] border border-line bg-surface px-3 focus-within:border-accent focus-within:ring-[3px] focus-within:ring-accent-soft">
+                        <span className="mr-1 text-sm text-ink-3">¥</span>
+                        <input type="number" min={rechargeMin} max={rechargeMax} step="0.01" inputMode="decimal" aria-label="充值金额" value={rechargeAmount} onChange={(event) => { setRechargeAmount(event.target.value); setCheckoutError(null); setActiveCheckout(null) }} onKeyDown={(event) => { if (getComposerEnterAction({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode }) === 'submit') void handleRecharge() }} className="min-w-0 flex-1 bg-transparent font-mono text-sm text-ink outline-none" />
+                      </label>
+                      {requiresPaymentType && (
+                        <div className="flex h-10 shrink-0 rounded-[11px] border border-line bg-surface p-1" aria-label="支付方式">
+                          {paymentTypes.includes('wxpay') && <button type="button" disabled={recharging} onClick={() => { const refresh = Boolean(activeCheckout); setPayType('wxpay'); setCheckoutError(null); setActiveCheckout(null); if (refresh) void handleRecharge('wxpay') }} aria-pressed={payType === 'wxpay'} className={`rounded-lg px-3 text-xs font-medium transition ${payType === 'wxpay' ? 'bg-accent text-white shadow-sm' : 'text-ink-3 hover:text-ink'}`}>微信支付</button>}
+                          {paymentTypes.includes('alipay') && <button type="button" disabled={recharging} onClick={() => { const refresh = Boolean(activeCheckout); setPayType('alipay'); setCheckoutError(null); setActiveCheckout(null); if (refresh) void handleRecharge('alipay') }} aria-pressed={payType === 'alipay'} className={`rounded-lg px-3 text-xs font-medium transition ${payType === 'alipay' ? 'bg-accent text-white shadow-sm' : 'text-ink-3 hover:text-ink'}`}>支付宝</button>}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <button type="button" disabled className="h-10 w-full rounded-[11px] border border-line bg-surface px-4 text-sm font-medium text-ink-3">暂未开放</button>
+                  )}
+                </div>
+                {paymentEnabled && (
+                  <button type="button" onClick={() => void handleRecharge()} disabled={!rechargeReady || recharging} className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-[11px] bg-[linear-gradient(150deg,var(--accent),#0891b2)] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition hover:-translate-y-px active:scale-[0.99] disabled:opacity-50 disabled:hover:translate-y-0">
+                    {recharging ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <>生成收款码<ScanLine className="h-4 w-4" /></>}
+                  </button>
+                )}
+                {paymentEnabled && !rechargeValid && <p className="mt-2 text-xs text-red-500">请输入有效的充值金额</p>}
+                {paymentEnabled && rechargeValid && requiresPaymentType && !payType && <p className="mt-2 text-xs text-ink-3">请选择微信支付或支付宝</p>}
+                {checkoutError && <p className="mt-2 rounded-[11px] bg-red-500/10 px-3 py-2 text-sm text-red-500">{checkoutError}</p>}
+                {activeCheckout && <PaymentQrModal embedded checkout={activeCheckout} productName="账户余额充值" onClose={closePayment} onPaid={handlePaymentPaid} />}
+              </div>
             </div>
-            <div className="min-w-0 rounded-2xl border border-line bg-surface2 p-4">
-              <div className="flex items-center gap-2 text-xs font-medium text-ink-3"><Image className="h-4 w-4 text-accent" />生图单价</div>
-              <div className="mt-2 break-words font-mono text-lg font-semibold text-ink sm:text-xl">{formatPlatformPrice(imageUnitPrice, status)}/张</div>
-              <div className="mt-0.5 text-[11px] text-ink-3">生成成功后扣除余额，失败或取消不扣费</div>
+          </section>
+
+          <div className="min-w-0 rounded-2xl border border-line bg-surface2 p-4">
+            <div className="flex items-center gap-2 text-xs font-medium text-ink-3"><Image className="h-4 w-4 text-accent" />生图价格</div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {IMAGE_PRICE_TIERS.map((tier) => (
+                <div key={tier.key} className="min-w-0 rounded-xl border border-line bg-surface px-3 py-2.5">
+                  <div className="text-xs font-medium text-ink-3">{tier.label}</div>
+                  <div className="mt-1 break-words font-mono text-sm font-semibold text-ink sm:text-base">{formatPlatformPrice(imagePrices[tier.key], status)}/张</div>
+                </div>
+              ))}
             </div>
+            <div className="mt-2 text-[11px] text-ink-3">按成功生成张数结算，失败或取消不扣费</div>
           </div>
 
-          {paymentEnabled && paymentProvider === 'dulupay' && (
-            <div className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-surface2 px-4 py-3">
-              <div>
-                <div className="text-sm font-medium text-ink">支付方式</div>
-                <div className="mt-0.5 text-xs text-ink-3">由 Dulupay 安全收银台处理</div>
-              </div>
-              <div className="flex rounded-[11px] border border-line bg-surface p-1">
-                <button type="button" onClick={() => setPayType('wxpay')} aria-pressed={payType === 'wxpay'} className={`h-8 rounded-lg px-3 text-xs font-medium transition ${payType === 'wxpay' ? 'bg-accent text-white shadow-sm' : 'text-ink-3 hover:text-ink'}`}>微信支付</button>
-                <button type="button" onClick={() => setPayType('alipay')} aria-pressed={payType === 'alipay'} className={`h-8 rounded-lg px-3 text-xs font-medium transition ${payType === 'alipay' ? 'bg-accent text-white shadow-sm' : 'text-ink-3 hover:text-ink'}`}>支付宝</button>
-              </div>
+          <details className="group rounded-2xl border border-line bg-surface2 p-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-ink">
+              <span className="flex items-center gap-2"><Bot className="h-4 w-4 text-accent" />Agent 模型价格</span>
+              <span className="text-xs font-normal text-ink-3">1 USD = ¥{usdCnyRate.toFixed(2)}</span>
+            </summary>
+            <div className="mt-3 grid gap-2">
+              {agentModelPrices.map((model) => (
+                <div key={model.id} className="rounded-xl border border-line bg-surface px-3 py-3">
+                  <div className="font-mono text-sm font-semibold text-ink">{model.label}</div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                    <div><div className="text-ink-3">输入</div><div className="mt-1 font-mono font-medium text-ink">{formatPlatformQuota(model.input_price_micros, status)}</div></div>
+                    <div><div className="text-ink-3">输出</div><div className="mt-1 font-mono font-medium text-ink">{formatPlatformQuota(model.output_price_micros, status)}</div></div>
+                    <div><div className="text-ink-3">缓存读取</div><div className="mt-1 font-mono font-medium text-ink">{formatPlatformQuota(model.cached_input_price_micros, status)}</div></div>
+                  </div>
+                  <div className="mt-1.5 text-[10px] text-ink-3">人民币 / 百万 tokens</div>
+                </div>
+              ))}
+              {agentModelPrices.length === 0 && <p className="py-3 text-center text-sm text-ink-3">价格信息加载中</p>}
             </div>
-          )}
-
-          <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface2 p-4 sm:flex-row sm:items-end sm:justify-between">
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-ink">账户余额充值</div>
-              <div className="mt-0.5 text-xs text-ink-3">充值后可用于生图、Agent 模型调用与联网搜索</div>
-              <div className="mt-1 text-[11px] text-ink-3">单次充值 ¥{rechargeMin.toFixed(2)}–¥{rechargeMax.toFixed(2)}</div>
-            </div>
-            {paymentEnabled ? (
-              <div className="flex shrink-0 gap-2">
-                <label className="flex h-10 w-32 items-center rounded-[11px] border border-line bg-surface px-3 focus-within:border-accent focus-within:ring-[3px] focus-within:ring-accent-soft">
-                  <span className="mr-1 text-sm text-ink-3">¥</span>
-                  <input type="number" min={rechargeMin} max={rechargeMax} step="0.01" inputMode="decimal" aria-label="充值金额" value={rechargeAmount} onChange={(event) => { setRechargeAmount(event.target.value); setCheckoutError(null) }} onKeyDown={(event) => { if (event.key === 'Enter') void handleRecharge() }} className="min-w-0 flex-1 bg-transparent font-mono text-sm text-ink outline-none" />
-                </label>
-                <button type="button" onClick={() => void handleRecharge()} disabled={!rechargeValid || recharging} className="inline-flex h-10 items-center justify-center gap-2 rounded-[11px] bg-[linear-gradient(150deg,var(--accent),#0891b2)] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-6px_var(--accent-glow)] transition hover:-translate-y-px active:scale-[0.99] disabled:opacity-50 disabled:hover:translate-y-0">
-                  {recharging ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <>生成收款码<ScanLine className="h-4 w-4" /></>}
-                </button>
-              </div>
-            ) : (
-              <button type="button" disabled className="h-10 shrink-0 rounded-[11px] border border-line bg-surface px-4 text-sm font-medium text-ink-3">暂未开放</button>
-            )}
-          </div>
-
-          {checkoutError && <p className="rounded-[11px] bg-red-500/10 px-3 py-2 text-sm text-red-500">{checkoutError}</p>}
+          </details>
 
           <div className="rounded-2xl border border-line bg-surface2 p-4">
             <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink"><Ticket className="h-4 w-4 text-accent" />兑换码</h3>
@@ -207,7 +274,7 @@ export default function BillingModal(props: BillingModalProps) {
               <input
                 value={redeemInput}
                 onChange={(e) => { setRedeemInput(e.target.value); setRedeemMsg(null) }}
-                onKeyDown={(e) => { if (e.key === 'Enter') void handleRedeem() }}
+                onKeyDown={(e) => { if (getComposerEnterAction({ key: e.key, shiftKey: e.shiftKey, isComposing: e.nativeEvent.isComposing, keyCode: e.nativeEvent.keyCode }) === 'submit') void handleRedeem() }}
                 placeholder="输入兑换码，如 ABCD-EFGH-JKLM"
                 className="h-10 min-w-0 flex-1 rounded-[11px] border border-line bg-surface px-3 font-mono text-sm uppercase tracking-wide text-ink outline-none transition placeholder:font-sans placeholder:normal-case placeholder:tracking-normal placeholder:text-ink-3 focus:border-accent focus:ring-[3px] focus:ring-accent-soft"
               />
@@ -243,7 +310,6 @@ export default function BillingModal(props: BillingModalProps) {
           </div>
         </div>
       </section>
-      {activeCheckout && <PaymentQrModal checkout={activeCheckout.checkout} productName={activeCheckout.productName} onClose={closePayment} onPaid={handlePaymentPaid} />}
     </div>
   )
 }

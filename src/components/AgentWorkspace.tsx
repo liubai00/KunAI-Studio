@@ -83,10 +83,6 @@ function formatTime(value: number) {
   return new Date(value).toLocaleString()
 }
 
-function formatCnyMicros(value: number) {
-  return `¥${(value / 1000000).toFixed(value > 0 && value < 10000 ? 4 : 2)}`
-}
-
 function AgentWebSearchInlineStatus({ status }: { status: AgentWebSearchStatus }) {
   return (
     <span className="inline-flex text-sm font-medium text-ink-2">
@@ -319,6 +315,7 @@ export default function AgentWorkspace() {
   const openFavoritePicker = useStore((s) => s.openFavoritePicker)
   const agentGeneratingTitleIds = useStore((s) => s.agentGeneratingTitleIds)
   const setAgentConversationOptions = useStore((s) => s.setAgentConversationOptions)
+  const selectAgentConversationModel = useStore((s) => s.selectAgentConversationModel)
   const platformAgentModels = usePlatformStore((s) => s.agentModels)
   const defaultAgentModel = usePlatformStore((s) => s.defaultAgentModel)
   const loadAgentModels = usePlatformStore((s) => s.loadAgentModels)
@@ -499,9 +496,10 @@ export default function AgentWorkspace() {
   }, [appMode, loadAgentModels, platformAgentModels.length])
 
   useEffect(() => {
-    if (!isPlatformModeEnabled() || !conversation || conversation.modelId || !defaultAgentModel) return
-    setAgentConversationOptions(conversation.id, { modelId: defaultAgentModel })
-  }, [conversation, defaultAgentModel, setAgentConversationOptions])
+    if (!isPlatformModeEnabled() || !conversation || !defaultAgentModel) return
+    if (platformAgentModels.some((model) => model.selectable && model.id === conversation.modelId)) return
+    selectAgentConversationModel(conversation.id, defaultAgentModel)
+  }, [conversation, defaultAgentModel, platformAgentModels, selectAgentConversationModel])
 
   useEffect(() => {
     if (!isPlatformModeEnabled() || !conversation) return
@@ -1133,22 +1131,6 @@ export default function AgentWorkspace() {
                           <MarkdownRenderer content={parts[0]?.text ?? ''} />
                         )}
                       </div>
-                    )}
-
-                    {isAssistant && round?.billing && round.billing.totalMicros > 0 && (
-                      <details className="mt-3 border-t border-line pt-2 text-xs text-ink-3">
-                        <summary className="cursor-pointer select-none font-medium hover:text-ink-2">
-                          本轮对话费用 {formatCnyMicros(round.billing.totalMicros)}
-                        </summary>
-                        <div className="mt-2 grid gap-1 font-mono text-[11px]">
-                          {round.billing.model && <span>模型：{round.billing.model}</span>}
-                          <span>输入：{round.billing.inputTokens} tokens（缓存 {round.billing.cachedInputTokens}）</span>
-                          <span>输出：{round.billing.outputTokens} tokens</span>
-                          <span>模型调用：{formatCnyMicros(round.billing.textChargeMicros)}</span>
-                          {round.billing.searchCalls > 0 && <span>联网搜索：{round.billing.searchCalls} 次 / {formatCnyMicros(round.billing.searchChargeMicros)}</span>}
-                          {(round.billing.imageCount || 0) > 0 && <span>生图：{round.billing.imageCount} 张 / {formatCnyMicros(Math.max(0, round.billing.totalMicros - round.billing.textChargeMicros - round.billing.searchChargeMicros))}</span>}
-                        </div>
-                      </details>
                     )}
 
                       </article>

@@ -90,6 +90,14 @@ test('self-contained platform charges image generations from CNY balance and kee
   assert.equal(status.data.email_verification, true)
   assert.equal(status.data.quota_display_type, 'CNY')
   assert.equal(status.data.image_studio.relay_configured, true)
+  assert.deepEqual(status.data.image_studio.image_prices, { '1k': 0.07, '2k': 0.07, '4k': 0.07 })
+  assert.equal(status.data.image_studio.usd_cny_rate, 7.2)
+  assert.deepEqual(status.data.image_studio.agent_model_prices.map((model) => model.id), [
+    'gpt-5.5',
+    'gpt-5.6-luna',
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+  ])
 
   response = await fetch(`${baseUrl}/api/platform/auth/verification`, {
     method: 'POST',

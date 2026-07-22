@@ -7,9 +7,10 @@ import { getActiveApiProfile, getAgentImageApiProfile, normalizeSettings } from 
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, imageMentionMatches, insertImageMentionAtVisibleRange, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, stripImageMentionMarkers } from '../lib/promptImageMentions'
 import { getImageSizeTier, normalizeImageSize } from '../lib/size'
-import { getQualityValueForSizeTier, QUALITY_TIER_OPTIONS } from '../lib/quality'
+import { getQualityValueForSizeTier, getSizeTierForQuality, QUALITY_TIER_OPTIONS } from '../lib/quality'
 import { isPlatformModeEnabled, PLATFORM_IMAGE_PROFILE_ID } from '../lib/platformMode'
-import { formatPlatformPrice, getPlatformGenerationPriceMicros } from '../lib/platformCurrency'
+import { getPlatformGenerationPriceMicros, getPlatformImagePrice } from '../lib/platformCurrency'
+import { getComposerEnterAction } from '../lib/composerKeyboard'
 import { usePlatformStore } from '../platformStore'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { getSafeBoundingClientRect } from '../lib/domRect'
@@ -741,18 +742,13 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
       : normalizeSettings({ ...settings, activeProfileId: activeProfile.id })
   ), [activeProfile.id, settingsActiveProfile.id, settings])
   const hasSubmitApiConfig = Boolean(activeProfile.apiKey)
-  const platformGenerationCount = normalizeParamsForSettings(params, effectiveSettings, { hasInputImages: inputImages.length > 0 }).n
-  const imageUnitPrice = platformStatus?.image_studio?.image_unit_price || 0
-  const generationPriceMicros = getPlatformGenerationPriceMicros(imageUnitPrice, platformGenerationCount)
-  const generationPrice = generationPriceMicros / 1000000
+  const platformBillingParams = normalizeParamsForSettings(params, effectiveSettings, { hasInputImages: inputImages.length > 0 })
+  const platformImageTier = getSizeTierForQuality(platformBillingParams.quality) ?? getImageSizeTier(platformBillingParams.size)
+  const generationPriceMicros = getPlatformGenerationPriceMicros(getPlatformImagePrice(platformStatus, platformImageTier), platformBillingParams.n)
   const availableBalanceMicros = Math.max(0, (platformUser?.quota || 0) - (platformUser?.reserved_quota || 0))
-  const showGenerationPrice = isPlatformModeEnabled() && appMode !== 'agent'
-  const balanceInsufficient = Boolean(showGenerationPrice && platformUser && availableBalanceMicros < generationPriceMicros)
-  const generationPriceText = showGenerationPrice
-    ? balanceInsufficient
-      ? `余额不足，本次需要 ${formatPlatformPrice(generationPrice, platformStatus)}，请先充值`
-      : `本次生成将扣除 ${formatPlatformPrice(generationPrice, platformStatus)}`
-    : ''
+  const usesPlatformImageBilling = isPlatformModeEnabled() && appMode !== 'agent'
+  const balanceInsufficient = Boolean(usesPlatformImageBilling && platformUser && availableBalanceMicros < generationPriceMicros)
+  const generationPriceText = balanceInsufficient ? '余额不足，请先充值' : ''
   const canSubmit = Boolean(prompt.trim() && hasSubmitApiConfig && !activeAgentIsRunning && !balanceInsufficient)
   const submitButtonAriaLabel = activeAgentIsRunning
     ? '停止生成'
@@ -1251,6 +1247,13 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const enterAction = getComposerEnterAction({
+      key: e.key,
+      shiftKey: e.shiftKey,
+      isComposing: e.nativeEvent.isComposing,
+      keyCode: e.nativeEvent.keyCode,
+    })
+    if (enterAction === 'ignore') return
     if (showAtImageMenu) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -1276,24 +1279,10 @@ export default function InputBar({ variant = 'dock' }: { variant?: 'dock' | 'pan
     }
 
     // 阻止 contentEditable 默认换行
-    if (e.key === 'Enter') {
+    if (enterAction) {
       e.preventDefault()
-
-      const isModifier = e.ctrlKey || e.metaKey
-
-      if (settings.enterSubmit) {
-        if (e.shiftKey) {
-          insertPromptTextAtSelection('\n')
-        } else if (!isModifier) {
-          if (canSubmit) submitCurrentMode()
-        }
-      } else {
-        if (isModifier) {
-          if (canSubmit) submitCurrentMode()
-        } else {
-          insertPromptTextAtSelection('\n')
-        }
-      }
+      if (enterAction === 'newline') insertPromptTextAtSelection('\n')
+      else if (canSubmit) submitCurrentMode()
       return
     }
   }

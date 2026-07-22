@@ -7,6 +7,7 @@ import {
   PlatformGateway,
   calculateAgentChargeMicros,
   calculateAgentRequestReserveMicros,
+  getImagePriceMicrosForTier,
   isAllowedRelayPath,
   isSameOriginRequest,
   hashNormalizedRelayRequest,
@@ -115,6 +116,14 @@ test('image relay selects the managed model for each resolution tier', async () 
   )
   assert.equal(JSON.parse(normalized.body.toString()).model, 'managed-image-2k')
   assert.deepEqual(normalized.requestedImageSize, { width: 2560, height: 1440, tier: '2k' })
+})
+
+test('image billing selects the configured price for each resolution tier', () => {
+  const prices = { '1k': 150000, '2k': 200000, '4k': 500000 }
+  assert.equal(getImagePriceMicrosForTier('1k', prices), 150000)
+  assert.equal(getImagePriceMicrosForTier('2k', prices), 200000)
+  assert.equal(getImagePriceMicrosForTier('4k', prices), 500000)
+  assert.equal(getImagePriceMicrosForTier('unknown', prices, 70000), 70000)
 })
 
 test('image relay rejects an upstream result materially below the requested dimensions', async () => {

@@ -1,4 +1,5 @@
-import type { PlatformStatus } from '../platformStore'
+import type { PlatformImagePrices, PlatformStatus } from '../platformStore'
+import type { SizeTier } from './size'
 
 function getDisplayType(status: PlatformStatus | null) {
   return status?.quota_display_type || (status?.display_in_currency === false ? 'TOKENS' : 'USD')
@@ -55,4 +56,10 @@ export function getPlatformGenerationPriceMicros(unitPrice: number, count: numbe
   const unitPriceMicros = Math.max(0, Math.round((Number.isFinite(unitPrice) ? unitPrice : 0) * 1000000))
   const imageCount = Math.max(1, Math.trunc(Number.isFinite(count) ? count : 1))
   return unitPriceMicros * imageCount
+}
+
+export function getPlatformImagePrice(status: PlatformStatus | null, tier: SizeTier) {
+  const prices = status?.image_studio?.image_prices
+  const key = tier.toLowerCase() as keyof PlatformImagePrices
+  return prices?.[key] ?? status?.image_studio?.image_unit_price ?? 0
 }

@@ -58,7 +58,9 @@ import { formatExportFileTime } from './lib/exportFileName'
 import { buildExportZip, readExportZip, readExportZipFileAsDataUrl } from './lib/exportZip'
 import { createUserScopedStorage } from './lib/userStorage'
 import { createPlatformSettings, isPlatformModeEnabled, PLATFORM_IMAGE_PROFILE_ID } from './lib/platformMode'
-import { getPlatformGenerationPriceMicros } from './lib/platformCurrency'
+import { getPlatformGenerationPriceMicros, getPlatformImagePrice } from './lib/platformCurrency'
+import { getSizeTierForQuality } from './lib/quality'
+import { getImageSizeTier } from './lib/size'
 import { getChineseImageDescription, getTaskImageDescription } from './lib/taskDescription'
 import { usePlatformStore } from './platformStore'
 
@@ -2495,7 +2497,8 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
   if (isPlatformModeEnabled() && activeProfile.id === PLATFORM_IMAGE_PROFILE_ID) {
     const platform = usePlatformStore.getState()
     const billingParams = normalizeParamsForSettings(params, requestSettings, { hasInputImages: inputImages.length > 0 })
-    const generationPriceMicros = getPlatformGenerationPriceMicros(platform.status?.image_studio?.image_unit_price || 0, billingParams.n)
+    const tier = getSizeTierForQuality(billingParams.quality) ?? getImageSizeTier(billingParams.size)
+    const generationPriceMicros = getPlatformGenerationPriceMicros(getPlatformImagePrice(platform.status, tier), billingParams.n)
     const availableMicros = Math.max(0, (platform.user?.quota || 0) - (platform.user?.reserved_quota || 0))
     if (platform.user && availableMicros < generationPriceMicros) {
       showToast('余额不足，请充值后再生成', 'error')

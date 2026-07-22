@@ -42,16 +42,20 @@ PLATFORM_IMAGE_MODEL=gpt-image-2
 PLATFORM_IMAGE_MODEL_1K=gpt-image-2
 PLATFORM_IMAGE_MODEL_2K=gpt-image-2-2k
 PLATFORM_IMAGE_MODEL_4K=gpt-image-2-4k
+PLATFORM_IMAGE_PRICE_1K_CNY=0.15
+PLATFORM_IMAGE_PRICE_2K_CNY=0.20
+PLATFORM_IMAGE_PRICE_4K_CNY=0.50
 
 AGENT_UPSTREAM_BASE_URL=https://agent-relay.example.com/v1
 AGENT_UPSTREAM_API_KEY=
 PLATFORM_AGENT_MODEL=gpt-5.5
+USD_CNY_RATE=7.20
 PLATFORM_AGENT_MAX_OUTPUT_TOKENS=4096
 PLATFORM_AGENT_INPUT_PRICE_CNY_PER_M=15
 PLATFORM_AGENT_CACHED_INPUT_PRICE_CNY_PER_M=1.5
 PLATFORM_AGENT_OUTPUT_PRICE_CNY_PER_M=120
 PLATFORM_AGENT_MAX_STEP_RESERVE_CNY=100
-PLATFORM_AGENT_AUTO_ENABLE_MODELS=gpt-5.5
+PLATFORM_AGENT_AUTO_ENABLE_MODELS=
 PLATFORM_AGENT_INPUT_TOKEN_OVERHEAD=8192
 PLATFORM_AGENT_ROUND_STEP_LIMIT=16
 PLATFORM_MAX_AGENT_BODY_MB=4
@@ -67,13 +71,15 @@ PLATFORM_SEARCH_ROUND_LIMIT=12
 
 `IMAGE_UPSTREAM_API_KEY`、`AGENT_UPSTREAM_API_KEY` 和 `TAVILY_API_KEY` 都只由 Node 服务读取，不得使用 `VITE_*` 变量，也不会写入浏览器、SQLite 或响应日志。文档示例故意将密钥留空；请通过部署环境或 Secret Manager 注入，禁止提交到仓库。
 
-当前图片中转使用 `gpt-image-2`、`gpt-image-2-2k` 和 `gpt-image-2-4k` 分别承载页面的 1K、2K、4K 档位。服务端根据请求尺寸的总像素自动选择对应模型，并继续忽略浏览器传入的模型名；供应商模型变化时可通过 `PLATFORM_IMAGE_MODEL_1K`、`PLATFORM_IMAGE_MODEL_2K` 和 `PLATFORM_IMAGE_MODEL_4K` 调整，未配置的档位会向下回退，最终使用 `PLATFORM_IMAGE_MODEL`。成功响应还会核验实际图片宽高至少达到请求宽高的 90%，并限制宽高比偏差不超过 12%；低档图片冒充 2K/4K 时任务失败并释放预留额度，不会扣费。
+当前图片中转使用 `gpt-image-2`、`gpt-image-2-2k` 和 `gpt-image-2-4k` 分别承载页面的 1K、2K、4K 档位。服务端根据请求尺寸的总像素自动选择对应模型，并使用 `PLATFORM_IMAGE_PRICE_1K_CNY`、`PLATFORM_IMAGE_PRICE_2K_CNY`、`PLATFORM_IMAGE_PRICE_4K_CNY` 对应的价格预留余额；默认分别为 ¥0.15、¥0.20、¥0.50/张。供应商模型变化时可调整各档模型，未配置的档位会向下回退，最终使用 `PLATFORM_IMAGE_MODEL`。成功响应还会核验实际图片宽高至少达到请求宽高的 90%，并限制宽高比偏差不超过 12%；低档图片冒充 2K/4K 时任务失败并释放预留额度，不会扣费。
 
 ## Agent 模型目录与 token 计费
 
-Agent 模型不再维护为前端静态列表。BFF 从独立 Agent 上游的 `GET /models` 获取目录，只接受合法的 `gpt-*` 模型；若上游提供 `supported_endpoint_types`，还必须包含 `openai`。目录默认缓存 10 分钟，刷新失败时可继续使用最近一次成功快照。
+Agent 模型目录仍由 BFF 从独立 Agent 上游的 `GET /models` 获取，但用户选择器只展示 `gpt-5.5`、`gpt-5.6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`。目录默认缓存 10 分钟，刷新失败时可继续使用最近一次成功快照。
 
-发现模型后，管理员在「Agent 模型与定价」后台决定是否启用、排序及默认模型，并分别配置。上游目录刷新时已消失的模型会自动变为不可选并取消默认状态；其历史配置和已锁定会话记录仍保留，重新发现后才能再次启用：
+这四个模型的美元价格由服务端固定价格表维护，并通过 `USD_CNY_RATE` 统一换算成人民币；默认汇率为 7.20。换算后的整数微人民币价格同时用于实际结算、模型目录响应和账户账单页，避免前后端分别硬编码。页面按两位小数展示，实际逐 token 结算保留微人民币精度。
+
+发现模型后，四个面向用户的固定模型会自动启用并同步统一价格；`gpt-5.5` 优先作为默认模型。上游目录刷新时已消失的模型会自动变为不可选并取消默认状态；其历史配置和已锁定会话记录仍保留，重新发现后才能再次启用。管理员后台仍可查看目录中的其他模型，但它们不会出现在普通用户的模型选择器中。每个模型保存以下计费字段：
 
 - 普通输入 token 单价；
 - 缓存输入 token 单价；
@@ -82,11 +88,11 @@ Agent 模型不再维护为前端静态列表。BFF 从独立 Agent 上游的 `G
 
 前三项价格单位均为“人民币元 / 百万 token”，金额在数据库中以整数微人民币存储。只有启用且四项价格完整的模型才可供用户选择；一个会话首次选定模型后会锁定该模型，避免后续轮次切换价格策略。
 
-模型发现本身不会授权使用。`PLATFORM_AGENT_INPUT_PRICE_CNY_PER_M`、`PLATFORM_AGENT_CACHED_INPUT_PRICE_CNY_PER_M`、`PLATFORM_AGENT_OUTPUT_PRICE_CNY_PER_M` 和 `PLATFORM_AGENT_MAX_STEP_RESERVE_CNY` 只是首次发现时使用的统一初始定价；只有四项都已配置，并且新模型的完整 ID 明确列入逗号分隔的 `PLATFORM_AGENT_AUTO_ENABLE_MODELS` 白名单，该模型才会在首次入库时自动启用。白名单留空时不自动启用任何新模型；未命中的新模型保持禁用且不带价格，已入库模型之后仍由管理员显式定价和启用。示例把 `gpt-5.5` 列入白名单，并把单步硬上限设为 ¥100；生产环境应按实际供应商价格和可接受风险逐个配置。
+`PLATFORM_AGENT_INPUT_PRICE_CNY_PER_M`、`PLATFORM_AGENT_CACHED_INPUT_PRICE_CNY_PER_M`、`PLATFORM_AGENT_OUTPUT_PRICE_CNY_PER_M` 和 `PLATFORM_AGENT_AUTO_ENABLE_MODELS` 仅保留给目录中的其他管理模型使用，不影响四个固定模型。`PLATFORM_AGENT_MAX_STEP_RESERVE_CNY` 是固定模型的单步预留金额硬上限，默认 ¥100。
 
 Agent 请求使用独立于图片中转的大小限制，`PLATFORM_MAX_AGENT_BODY_MB=4` 表示 JSON 请求体默认最多 4 MB；图片请求仍使用单独的 `PLATFORM_MAX_RELAY_BODY_MB`。前端优先使用持久化缩略图，并按“当前轮、最近轮优先”把每次 Agent 请求中的图片 data URL 控制在约 2 MiB；被裁剪的引用会显式标记为不可用，不会打乱引用编号。不要仅为了容纳无限增长的历史上下文而随意提高 Agent 上限。
 
-每次 Responses 调用不会直接冻结完整的单步上限。服务端按规范化 JSON 的字节数、`PLATFORM_AGENT_INPUT_TOKEN_OVERHEAD` 输入 token 安全余量，以及受 `PLATFORM_AGENT_MAX_OUTPUT_TOKENS` 约束的最大输出 token，使用普通输入与缓存输入价格中的较高者动态计算保守预留。估算值超过该模型已保存的单步硬上限时，请求会在调用上游前被拒绝；否则只预留估算值。`PLATFORM_AGENT_MAX_STEP_RESERVE_CNY` 是新模型首次发现时写入该上限的种子值，不会覆盖管理员后续的逐模型配置。成功响应必须带可核验的 `usage.input_tokens`、`usage.input_tokens_details.cached_tokens` 和 `usage.output_tokens`，实际费用按“非缓存输入 + 缓存输入 + 输出”三部分分别计算后结算，多余预留立即释放；失败、超时、缺少可核验 usage 或实际费用异常超过预留时不向用户结算。
+每次 Responses 调用不会直接冻结完整的单步上限。服务端按规范化 JSON 的字节数、`PLATFORM_AGENT_INPUT_TOKEN_OVERHEAD` 输入 token 安全余量，以及受 `PLATFORM_AGENT_MAX_OUTPUT_TOKENS` 约束的最大输出 token，使用普通输入与缓存输入价格中的较高者动态计算保守预留。估算值超过该模型已保存的单步硬上限时，请求会在调用上游前被拒绝；否则只预留估算值。成功响应必须带可核验的 `usage.input_tokens`、`usage.input_tokens_details.cached_tokens` 和 `usage.output_tokens`，实际费用按“非缓存输入 + 缓存输入 + 输出”三部分分别计算后结算，多余预留立即释放；失败、超时、缺少可核验 usage 或实际费用异常超过预留时不向用户结算。
 
 同一用户可见轮次内的 Agent Responses 调用还有独立硬上限，默认 `PLATFORM_AGENT_ROUND_STEP_LIMIT=16`。明确失败并释放预留的调用不占成功步骤额度，因此前端可用新幂等键重试；但总尝试次数仍被限制为步骤上限的两倍，不能通过持续更换步骤 ID 绕过。Agent 对话本身不消耗生图次数，只有 Agent 实际调用图片工具并成功生成图片时才进入下文的生图次数规则。
 

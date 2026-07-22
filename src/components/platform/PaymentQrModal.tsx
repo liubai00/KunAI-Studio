@@ -15,6 +15,7 @@ interface PaymentQrModalProps {
   onClose: () => void
   onPaid: (status: PlatformPaymentStatus) => Promise<void> | void
   returnFocusRef?: RefObject<HTMLElement | null>
+  embedded?: boolean
 }
 
 export function shouldPollPlatformPayment(visible: boolean, state: string, expiresAt: number, now = Date.now()) {
@@ -42,7 +43,7 @@ export default function PaymentQrModal(props: PaymentQrModalProps) {
     }).catch(() => {
       if (!active) return
       setState('failed')
-      setMessage('支付二维码生成失败，请关闭后重新发起支付')
+      setMessage('支付二维码生成失败，请重新生成收款码')
     })
     return () => { active = false }
   }, [props.checkout.qr_content])
@@ -51,7 +52,7 @@ export default function PaymentQrModal(props: PaymentQrModalProps) {
     if (checkingRef.current || settledRef.current || state !== 'pending') return
     if (Date.now() >= props.checkout.expires_at) {
       setState('expired')
-      setMessage('订单已过期，请关闭后重新发起支付')
+      setMessage('订单已过期，请重新生成收款码')
       return
     }
     checkingRef.current = true
@@ -61,7 +62,7 @@ export default function PaymentQrModal(props: PaymentQrModalProps) {
       const result = await recheckPlatformPayment(props.checkout.checkout_intent_id)
       if (result.status === 'expired') {
         setState('expired')
-        setMessage('订单已过期，请关闭后重新发起支付')
+        setMessage('订单已过期，请重新生成收款码')
         return
       }
       if (!result.paid) {
@@ -86,7 +87,7 @@ export default function PaymentQrModal(props: PaymentQrModalProps) {
       if (!shouldPollPlatformPayment(document.visibilityState === 'visible', state, props.checkout.expires_at)) {
         if (state === 'pending' && Date.now() >= props.checkout.expires_at) {
           setState('expired')
-          setMessage('订单已过期，请关闭后重新发起支付')
+          setMessage('订单已过期，请重新生成收款码')
         }
         return
       }
@@ -100,22 +101,21 @@ export default function PaymentQrModal(props: PaymentQrModalProps) {
     }
   }, [checkPayment, props.checkout.expires_at, state])
 
-  useCloseOnEscape(true, props.onClose)
-  useModalFocus(true, dialogRef, props.returnFocusRef)
-  usePreventBackgroundScroll(true, dialogRef)
+  useCloseOnEscape(!props.embedded, props.onClose)
+  useModalFocus(!props.embedded, dialogRef, props.returnFocusRef)
+  usePreventBackgroundScroll(!props.embedded, dialogRef)
 
   const expiresText = new Date(props.checkout.expires_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   const payLabel = props.checkout.pay_type === 'alipay' ? '支付宝扫码支付' : '微信扫码支付'
 
-  return (
-    <GlobalModal layer="dialog" onClose={props.onClose} className="p-3" backdropClassName="!bg-[rgba(5,8,24,0.78)] backdrop-blur-md">
-      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="payment-qr-title" tabIndex={-1} className="relative z-10 max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto rounded-[24px] border border-line2 bg-surface p-5 shadow-lift outline-none animate-modal-in sm:p-6">
+  const panel = (
+    <section ref={dialogRef} role={props.embedded ? 'region' : 'dialog'} aria-modal={props.embedded ? undefined : true} aria-labelledby="payment-qr-title" tabIndex={-1} className={props.embedded ? 'mt-4 rounded-2xl border border-line bg-surface p-4 outline-none' : 'relative z-10 max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto rounded-[24px] border border-line2 bg-surface p-5 shadow-lift outline-none animate-modal-in sm:p-6'}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-accent"><ScanLine className="h-4 w-4" />Secure payment</div>
             <h2 id="payment-qr-title" className="font-display text-xl font-semibold text-ink">{payLabel}</h2>
           </div>
-          <button type="button" onClick={props.onClose} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-ink-3 transition hover:bg-surface2 hover:text-ink" aria-label="关闭支付弹窗"><X className="h-5 w-5" /></button>
+          <button type="button" onClick={props.onClose} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-ink-3 transition hover:bg-surface2 hover:text-ink" aria-label="关闭支付二维码"><X className="h-5 w-5" /></button>
         </div>
 
         <div className="mt-5 rounded-2xl border border-line bg-white p-3">
@@ -145,7 +145,14 @@ export default function PaymentQrModal(props: PaymentQrModalProps) {
           )}
         </div>
         {props.checkout.checkout_url && <a href={props.checkout.checkout_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 text-sm text-ink-3 transition hover:text-ink">无法扫码？打开安全收银台<ExternalLink className="h-4 w-4" /></a>}
-      </section>
+    </section>
+  )
+
+  if (props.embedded) return panel
+
+  return (
+    <GlobalModal layer="dialog" onClose={props.onClose} className="p-3" backdropClassName="!bg-[rgba(5,8,24,0.78)] backdrop-blur-md">
+      {panel}
     </GlobalModal>
   )
 }

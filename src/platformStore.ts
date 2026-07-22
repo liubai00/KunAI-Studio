@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { filterPlatformAgentModels } from './lib/platformAgentModels'
 import { getPlatformCsrfToken } from './lib/platformSession'
 import { clearActiveStorageUser, setActiveStorageUser } from './lib/userStorage'
 
@@ -56,6 +57,20 @@ export interface PlatformAgentModel {
   last_seen_at: number | null
 }
 
+export interface PlatformAgentModelPrice {
+  id: string
+  label: string
+  input_price_micros: number
+  cached_input_price_micros: number
+  output_price_micros: number
+}
+
+export interface PlatformImagePrices {
+  '1k': number
+  '2k': number
+  '4k': number
+}
+
 export interface AgentModelInput {
   label?: string
   enabled?: boolean
@@ -86,6 +101,7 @@ export interface PlatformStatus {
   custom_currency_exchange_rate?: number
   image_studio?: {
     image_unit_price: number
+    image_prices?: PlatformImagePrices
     payment_url?: string
     payment_enabled?: boolean
     payment_provider?: 'dulupay' | 'custom' | null
@@ -99,6 +115,8 @@ export interface PlatformStatus {
     search_configured?: boolean
     search_price?: number
     default_agent_model?: string | null
+    usd_cny_rate?: number
+    agent_model_prices?: PlatformAgentModelPrice[]
     image_models?: string[]
     products?: PlatformProduct[]
   }
@@ -140,6 +158,9 @@ export interface PlatformBilling extends PlatformUser {
   recharge_min?: number
   recharge_max?: number
   image_unit_price: number
+  image_prices?: PlatformImagePrices
+  usd_cny_rate?: number
+  agent_model_prices?: PlatformAgentModelPrice[]
   products?: PlatformProduct[]
   entries: PlatformLedgerEntry[]
   agent_rounds?: PlatformBillingRound[]
@@ -277,9 +298,13 @@ async function loadSession() {
 }
 
 function readAgentModelList(value: AgentModelList | PlatformAgentModel[]) {
-  if (Array.isArray(value)) return { models: value, defaultModel: value.find((model) => model.is_default)?.id ?? null }
-  const models = Array.isArray(value?.models) ? value.models : []
-  return { models, defaultModel: value?.default_model ?? models.find((model) => model.is_default)?.id ?? null }
+  const source = Array.isArray(value) ? value : Array.isArray(value?.models) ? value.models : []
+  const models = filterPlatformAgentModels(source)
+  const requestedDefault = Array.isArray(value) ? null : value?.default_model
+  const defaultModel = models.some((model) => model.id === requestedDefault)
+    ? requestedDefault ?? null
+    : models.find((model) => model.is_default)?.id ?? models[0]?.id ?? null
+  return { models, defaultModel }
 }
 
 function activateUser(user: PlatformUser) {

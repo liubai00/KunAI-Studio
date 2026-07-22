@@ -108,6 +108,11 @@ export function selectImageModel(size, models = {}, fallback = 'gpt-image-2') {
   return models['4k'] || models['2k'] || models['1k'] || fallback
 }
 
+export function getImagePriceMicrosForTier(tier, prices = {}, fallback = 0) {
+  const value = prices[tier] ?? fallback
+  return Math.max(0, Number(value) || 0)
+}
+
 export async function normalizeRelayRequest(path, contentType, body, options = {}) {
   const normalizedPath = path.replace(/^\/+/, '').replace(/\/+$/, '')
   const imageModel = options.imageModel || 'gpt-image-2'
@@ -391,6 +396,7 @@ export class PlatformGateway {
     this.agentInputTokenOverhead = Number(options.agentInputTokenOverhead) >= 0 ? Math.trunc(Number(options.agentInputTokenOverhead)) : 8192
     this.agentRoundStepLimit = Number(options.agentRoundStepLimit) > 0 ? Math.trunc(Number(options.agentRoundStepLimit)) : 16
     this.imagePriceMicros = Math.max(0, Number(options.imagePriceMicros) || 0)
+    this.imagePricesMicros = options.imagePricesMicros || {}
     this.resultDir = resolve(options.resultDir || join('data', 'results'))
     this.maxImagePixels = Number(options.maxImagePixels) > 0 ? Number(options.maxImagePixels) : 40 * 1000 * 1000
     this.minResultFreeBytes = Number(options.minResultFreeBytes) > 0 ? Number(options.minResultFreeBytes) : 512 * 1024 * 1024
@@ -809,11 +815,12 @@ export class PlatformGateway {
       }
       await this.ensureResultCapacity()
       const requestHash = await hashNormalizedRelayRequest(normalizedPath, normalized)
+      const imagePriceMicros = getImagePriceMicrosForTier(normalized.requestedImageTier || '1k', this.imagePricesMicros, this.imagePriceMicros)
       const reservation = this.db.reserveGeneration({
         userId: user.id,
         idempotencyKey,
         requestHash,
-        priceMicros: this.imagePriceMicros,
+        priceMicros: imagePriceMicros,
         billingRoundId: billingRound?.id ?? null,
       })
       job = reservation.job

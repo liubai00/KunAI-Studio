@@ -26,42 +26,13 @@ export default function GeneralSettingsTab({
 }: GeneralSettingsTabProps) {
   return (
     <div>
-      <div className={`first:pt-0.5 ${ROW} hidden sm:block`}>
+      <div className={`first:pt-0.5 ${ROW}`}>
         <div className={HEAD}>
           <span className={LABEL}>任务提交方式</span>
-          <div className="w-[130px] shrink-0">
-            <Select
-              value={draft.enterSubmit ? 'enter' : 'ctrl-enter'}
-              onChange={(val) => commitSettings({ ...draft, enterSubmit: val === 'enter' })}
-              options={[
-                { label: navigator.userAgent.includes('Mac') ? '⌘ + Enter' : 'Ctrl + Enter', value: 'ctrl-enter' },
-                { label: 'Enter', value: 'enter' }
-              ]}
-              className={SEL}
-            />
-          </div>
+          <span className="rounded-[9px] border border-line bg-surface2 px-3 py-1.5 text-xs font-medium text-ink">Enter 发送</span>
         </div>
         <div data-selectable-text className={DESC}>
-          选择 {navigator.userAgent.includes('Mac') ? '⌘ + Enter' : 'Ctrl + Enter'} 时，Enter 换行；选择 Enter 时，Shift + Enter 换行。
-        </div>
-      </div>
-      <div className={`${ROW} sm:hidden`}>
-        <div className={HEAD}>
-          <span className={LABEL}>任务提交方式</span>
-          <div className="w-[130px] shrink-0">
-            <Select
-              value={draft.enterSubmit ? 'enter' : 'button'}
-              onChange={(val) => commitSettings({ ...draft, enterSubmit: val === 'enter' })}
-              options={[
-                { label: '发送按钮', value: 'button' },
-                { label: '回车/发送按钮', value: 'enter' }
-              ]}
-              className={SEL}
-            />
-          </div>
-        </div>
-        <div data-selectable-text className={DESC}>
-          选择回车/发送按钮时，回车可提交；否则仅使用发送按钮提交。
+          Enter 直接发送，Shift + Enter 换行；中文输入法选词时不会误触发送。
         </div>
       </div>
       <div className={ROW}>

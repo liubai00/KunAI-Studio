@@ -14,6 +14,11 @@ import {
 import { PlatformDatabase, isMembershipActive, parseMoneyToMicros } from './platformDb.mjs'
 import { AgentModelCatalog } from './agentModelPolicy.mjs'
 import { DulupayClient } from './dulupay.mjs'
+import {
+  DEFAULT_IMAGE_PRICES_CNY,
+  createAgentModelPriceCatalog,
+  parseUsdCnyRate,
+} from './platformPricing.mjs'
 import { callTavilySearch, toSearchWebError, validateSearchWebInput } from './tavilySearch.mjs'
 import {
   PlatformGateway,
@@ -63,6 +68,7 @@ function loadConfig(env) {
   const paymentUrl = /^https?:\/\/pay\.example\.com(?:[/:?#]|$)/i.test(rawPaymentUrl) ? '' : rawPaymentUrl
   const paymentWebhookSecret = String(env.PAYMENT_WEBHOOK_SECRET || '').trim()
   const dulupayEnabled = parseBoolean(env.DULUPAY_ENABLED)
+  const usdCnyRate = parseUsdCnyRate(env.USD_CNY_RATE)
   const defaultDbPath = resolve(ROOT_DIR, 'data', 'kunai-studio.sqlite')
   const legacyDbPath = resolve(ROOT_DIR, 'data', 'image-studio.sqlite')
   if (production && !appOrigin) throw new Error('生产环境必须配置 APP_ORIGIN')
@@ -117,7 +123,11 @@ function loadConfig(env) {
       timeoutMs: Number(env.DULUPAY_TIMEOUT_MS || 10000),
       timestampSkewSeconds: Number(env.DULUPAY_TIMESTAMP_SKEW_SECONDS || 300),
     },
-    imageUnitPriceMicros: parseMoneyToMicros(env.IMAGE_UNIT_PRICE || '0.07'),
+    imagePricesMicros: {
+      '1k': parseMoneyToMicros(env.PLATFORM_IMAGE_PRICE_1K_CNY || String(DEFAULT_IMAGE_PRICES_CNY['1k'])),
+      '2k': parseMoneyToMicros(env.PLATFORM_IMAGE_PRICE_2K_CNY || String(DEFAULT_IMAGE_PRICES_CNY['2k'])),
+      '4k': parseMoneyToMicros(env.PLATFORM_IMAGE_PRICE_4K_CNY || String(DEFAULT_IMAGE_PRICES_CNY['4k'])),
+    },
     signupCreditMicros: parseMoneyToMicros(env.PLATFORM_SIGNUP_CREDIT || '0'),
     imageModel: env.PLATFORM_IMAGE_MODEL || env.VITE_PLATFORM_IMAGE_MODEL || 'gpt-image-2',
     imageModels: {
@@ -126,6 +136,9 @@ function loadConfig(env) {
       '4k': env.PLATFORM_IMAGE_MODEL_4K || '',
     },
     agentModel: env.PLATFORM_AGENT_MODEL || env.VITE_PLATFORM_AGENT_MODEL || 'gpt-5.5',
+    usdCnyRate,
+    agentModelPrices: createAgentModelPriceCatalog(usdCnyRate),
+    agentFixedMaxReserveMicros: parseMoneyToMicros(env.PLATFORM_AGENT_MAX_STEP_RESERVE_CNY || '100'),
     agentSeedInputPriceMicros: parseOptionalMoneyToMicros(env.PLATFORM_AGENT_INPUT_PRICE_CNY_PER_M),
     agentSeedCachedInputPriceMicros: parseOptionalMoneyToMicros(env.PLATFORM_AGENT_CACHED_INPUT_PRICE_CNY_PER_M),
     agentSeedOutputPriceMicros: parseOptionalMoneyToMicros(env.PLATFORM_AGENT_OUTPUT_PRICE_CNY_PER_M),
@@ -298,6 +311,48 @@ function serializeAgentModel(model) {
   }
 }
 
+function serializeAgentModelPrice(model) {
+  return {
+    id: model.id,
+    label: model.label,
+    input_price_micros: model.inputPriceMicros,
+    cached_input_price_micros: model.cachedInputPriceMicros,
+    output_price_micros: model.outputPriceMicros,
+  }
+}
+
+function serializeImagePrices(prices) {
+  return Object.fromEntries(Object.entries(prices).map(([tier, micros]) => [tier, micros / 1000000]))
+}
+
+function syncFixedAgentModelPrices(db, config) {
+  const models = config.agentModelPrices
+    .map((price) => ({ price, current: db.getAgentModel(price.id) }))
+    .filter((item) => item.current?.lastSeenAt != null)
+  const defaultId = models.some((item) => item.price.id === config.agentModel)
+    ? config.agentModel
+    : models[0]?.price.id
+  for (const item of models) {
+    const changes = {
+      label: item.price.label,
+      enabled: true,
+      sortOrder: item.price.sortOrder,
+      isDefault: item.price.id === defaultId,
+      inputTokenPriceMicros: item.price.inputPriceMicros,
+      cachedInputTokenPriceMicros: item.price.cachedInputPriceMicros,
+      outputTokenPriceMicros: item.price.outputPriceMicros,
+      maxStepReserveMicros: config.agentFixedMaxReserveMicros,
+    }
+    const unchanged = item.current.label === changes.label && item.current.enabled === changes.enabled
+      && item.current.sortOrder === changes.sortOrder && item.current.isDefault === changes.isDefault
+      && item.current.inputTokenPriceMicros === changes.inputTokenPriceMicros
+      && item.current.cachedInputTokenPriceMicros === changes.cachedInputTokenPriceMicros
+      && item.current.outputTokenPriceMicros === changes.outputTokenPriceMicros
+      && item.current.maxStepReserveMicros === changes.maxStepReserveMicros
+    if (!unchanged) db.configureAgentModel(null, item.price.id, changes)
+  }
+}
+
 function serializeBillingRound(round) {
   return {
     id: round.id,
@@ -346,7 +401,16 @@ function serveStatic(req, res, pathname) {
 export function createPlatformApp(options = {}) {
   const env = options.env || process.env
   const config = { ...loadConfig(env), ...options.config }
+  if (options.config?.imageUnitPriceMicros !== undefined && options.config?.imagePricesMicros === undefined) {
+    config.imagePricesMicros = {
+      '1k': options.config.imageUnitPriceMicros,
+      '2k': options.config.imageUnitPriceMicros,
+      '4k': options.config.imageUnitPriceMicros,
+    }
+  }
+  config.imageUnitPriceMicros = config.imagePricesMicros['1k']
   const db = options.db || new PlatformDatabase({ path: config.dbPath })
+  syncFixedAgentModelPrices(db, config)
   const auth = options.auth || new PlatformAuth(createAuthOptionsFromEnv(env, {
     db,
     signupCreditMicros: config.signupCreditMicros,
@@ -373,6 +437,7 @@ export function createPlatformApp(options = {}) {
     agentInputTokenOverhead: config.agentInputTokenOverhead,
     agentRoundStepLimit: config.agentRoundStepLimit,
     imagePriceMicros: config.imageUnitPriceMicros,
+    imagePricesMicros: config.imagePricesMicros,
     resultDir: config.resultDir,
     maxImagePixels: config.maxImagePixels,
     minResultFreeBytes: config.minResultFreeBytes,
@@ -455,6 +520,8 @@ export function createPlatformApp(options = {}) {
     const snapshot = await agentModelCatalog.get({ force })
     const existingIds = new Set(db.listAgentModels().map((model) => model.id))
     db.upsertDiscoveredAgentModels(snapshot.models)
+    const fixedPrices = new Map(config.agentModelPrices.map((model) => [model.id, model]))
+    syncFixedAgentModelPrices(db, config)
     const seedPricingReady = [
       config.agentSeedInputPriceMicros,
       config.agentSeedCachedInputPriceMicros,
@@ -463,6 +530,7 @@ export function createPlatformApp(options = {}) {
     ].every((value) => value != null)
     if (seedPricingReady) {
       for (const id of snapshot.models) {
+        if (fixedPrices.has(id)) continue
         if (existingIds.has(id) || !config.agentAutoEnableModels.has(id)) continue
         db.configureAgentModel(null, id, {
           enabled: true,
@@ -820,6 +888,7 @@ export function createPlatformApp(options = {}) {
           quota_display_type: 'CNY',
           image_studio: {
             image_unit_price: config.imageUnitPriceMicros / 1000000,
+            image_prices: serializeImagePrices(config.imagePricesMicros),
             payment_url: config.paymentUrl,
             payment_enabled: paymentEnabled,
             payment_provider: dulupay ? 'dulupay' : config.paymentUrl ? 'custom' : null,
@@ -833,6 +902,8 @@ export function createPlatformApp(options = {}) {
             search_configured: Boolean(config.tavilyApiKey),
             search_price: config.searchPriceMicros / 1000000,
             default_agent_model: db.getDefaultAgentModel?.()?.id || null,
+            usd_cny_rate: config.usdCnyRate,
+            agent_model_prices: config.agentModelPrices.map(serializeAgentModelPrice),
             image_models: Object.values(config.imageModels).filter(Boolean),
             products: db.listProducts({ activeOnly: true }).map(serializeProduct),
           },
@@ -847,11 +918,8 @@ export function createPlatformApp(options = {}) {
     }
     if (pathname === '/api/platform/agent-models' && req.method === 'GET') {
       requireSession(req)
-      let models = db.listAgentModels({ selectableOnly: true })
-      if (models.length === 0 && config.agentBaseUrl && config.agentApiKey) {
-        await refreshAgentModels(false)
-        models = db.listAgentModels({ selectableOnly: true })
-      }
+      if (config.agentBaseUrl && config.agentApiKey) await refreshAgentModels(false)
+      const models = db.listAgentModels({ selectableOnly: true })
       sendJson(res, 200, {
         success: true,
         data: {
@@ -874,6 +942,9 @@ export function createPlatformApp(options = {}) {
           recharge_min: config.rechargeMinMicros / 1000000,
           recharge_max: config.rechargeMaxMicros / 1000000,
           image_unit_price: config.imageUnitPriceMicros / 1000000,
+          image_prices: serializeImagePrices(config.imagePricesMicros),
+          usd_cny_rate: config.usdCnyRate,
+          agent_model_prices: config.agentModelPrices.map(serializeAgentModelPrice),
           products: db.listProducts({ activeOnly: true }).map(serializeProduct),
           entries: db.listLedger(session.user.id, url.searchParams.get('limit')),
           agent_rounds: db.listBillingRounds?.(session.user.id, url.searchParams.get('round_limit') || 30).map(serializeBillingRound) || [],
